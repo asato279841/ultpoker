@@ -702,10 +702,11 @@ function saveEntries() {
 }
 
 // Ante/Blind push on a tie, lose on a loss, and on a win: Ante pays 1:1 only if
-// the dealer qualified, Blind pays via BLIND_PAYOUTS only for a straight or
-// better (otherwise it just pushes). Play always follows the win/lose/push
-// result at the recorded multiplier. Trips is independent of the hand result
-// and pays via TRIPS_PAYOUTS based on the completed hand alone.
+// the dealer qualified (otherwise it just pushes), Blind pays via
+// BLIND_PAYOUTS only for a straight or better (otherwise it just pushes) and
+// is unaffected by qualify. Play always follows the win/lose/push result at
+// the recorded multiplier. Trips is independent of the hand result and pays
+// via TRIPS_PAYOUTS based on the completed hand alone.
 function computeProfit(e) {
   const mult = Number(e.mult) || 0;
   let ante = 0;
