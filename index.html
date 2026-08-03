@@ -249,6 +249,103 @@
     cursor: pointer;
     margin-bottom: 16px;
   }
+
+  .picker-btn {
+    width: 100%;
+    text-align: left;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    background: #222b40;
+    color: var(--text);
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+  .picker-btn.placeholder { color: var(--text-dim); }
+
+  .picker-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+    z-index: 1000;
+  }
+  .picker-overlay.show { opacity: 1; pointer-events: auto; }
+  .picker-sheet {
+    background: var(--card);
+    width: 100%;
+    max-width: 480px;
+    border: 1px solid var(--card-border);
+    border-bottom: none;
+    border-radius: 16px 16px 0 0;
+    transform: translateY(100%);
+    transition: transform 0.25s;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .picker-overlay.show .picker-sheet { transform: translateY(0); }
+  .picker-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--card-border);
+    font-size: 0.95rem;
+    font-weight: 700;
+  }
+  .picker-header button {
+    background: none;
+    border: none;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 4px 6px;
+    color: var(--accent);
+  }
+  .picker-header .picker-cancel-btn { color: var(--text-dim); }
+  .picker-wheel-wrap {
+    position: relative;
+    height: 220px;
+    overflow: hidden;
+  }
+  .picker-wheel {
+    height: 100%;
+    overflow-y: scroll;
+    scroll-snap-type: y mandatory;
+    padding: 88px 0;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .picker-wheel::-webkit-scrollbar { display: none; }
+  .picker-item {
+    height: 44px;
+    line-height: 44px;
+    text-align: center;
+    scroll-snap-align: center;
+    color: var(--text-dim);
+    font-size: 1rem;
+    transition: color 0.15s, font-size 0.15s;
+  }
+  .picker-item.active {
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 1.1rem;
+  }
+  .picker-highlight {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 44px;
+    transform: translateY(-50%);
+    border-top: 1px solid var(--card-border);
+    border-bottom: 1px solid var(--card-border);
+    pointer-events: none;
+  }
 </style>
 </head>
 <body>
@@ -295,19 +392,12 @@
 
   <div class="field">
     <label>完成した役</label>
-    <select id="handSelect">
-      <option value="">選択してください</option>
-      <option value="ハイカード">ハイカード</option>
-      <option value="ペア">ペア</option>
-      <option value="ツーペア">ツーペア</option>
-      <option value="スリーカード">スリーカード</option>
-      <option value="ストレート">ストレート</option>
-      <option value="フラッシュ">フラッシュ</option>
-      <option value="フルハウス">フルハウス</option>
-      <option value="フォーカード">フォーカード</option>
-      <option value="ストレートフラッシュ">ストレートフラッシュ</option>
-      <option value="ロイヤルフラッシュ">ロイヤルフラッシュ</option>
-    </select>
+    <button type="button" class="picker-btn placeholder" id="handPickerBtn">選択してください</button>
+  </div>
+
+  <div class="field">
+    <label>ディーラー</label>
+    <button type="button" class="picker-btn placeholder" id="dealerPickerBtn">選択してください</button>
   </div>
 
   <div class="field">
@@ -319,6 +409,20 @@
   <button type="button" class="cancel-btn" id="cancelBtn">キャンセル</button>
 </form>
 
+<div class="picker-overlay" id="pickerOverlay">
+  <div class="picker-sheet">
+    <div class="picker-header">
+      <button type="button" class="picker-cancel-btn" id="pickerCancelBtn">キャンセル</button>
+      <span id="pickerTitle"></span>
+      <button type="button" id="pickerDoneBtn">決定</button>
+    </div>
+    <div class="picker-wheel-wrap">
+      <div class="picker-highlight"></div>
+      <div class="picker-wheel" id="pickerWheel"></div>
+    </div>
+  </div>
+</div>
+
 <div class="entry-list">
   <h2>記録一覧</h2>
   <div id="entries"></div>
@@ -326,9 +430,13 @@
 
 <script>
 const STORAGE_KEY = 'ultimate_poker_entries_v1';
+const DEALER_STORAGE_KEY = 'ultimate_poker_dealers_v1';
+const HAND_OPTIONS = ['ハイカード', 'ペア', 'ツーペア', 'スリーカード', 'ストレート', 'フラッシュ', 'フルハウス', 'フォーカード', 'ストレートフラッシュ', 'ロイヤルフラッシュ'];
+const PICKER_ITEM_HEIGHT = 44;
 
-let state = { mult: null, result: null, qualify: null };
+let state = { mult: null, result: null, qualify: null, hand: '', dealer: '' };
 let entries = [];
+let dealers = [];
 let editingId = null;
 let deleteConfirmId = null;
 
@@ -337,6 +445,13 @@ const toggleFormBtn = document.getElementById('toggleFormBtn');
 const cancelBtn = document.getElementById('cancelBtn');
 const entriesDiv = document.getElementById('entries');
 const summaryDiv = document.getElementById('summary');
+const handPickerBtn = document.getElementById('handPickerBtn');
+const dealerPickerBtn = document.getElementById('dealerPickerBtn');
+const pickerOverlay = document.getElementById('pickerOverlay');
+const pickerWheel = document.getElementById('pickerWheel');
+const pickerTitle = document.getElementById('pickerTitle');
+const pickerCancelBtn = document.getElementById('pickerCancelBtn');
+const pickerDoneBtn = document.getElementById('pickerDoneBtn');
 
 function setupBtnGroup(groupId, stateKey, errorId) {
   const group = document.getElementById(groupId);
@@ -354,14 +469,130 @@ setupBtnGroup('resultGroup', 'result', 'resultError');
 setupBtnGroup('qualifyGroup', 'qualify', 'qualifyError');
 
 function resetForm() {
-  state = { mult: null, result: null, qualify: null };
+  state = { mult: null, result: null, qualify: null, hand: '', dealer: '' };
   editingId = null;
   document.getElementById('editingId').value = '';
-  document.getElementById('handSelect').value = '';
+  setPickerBtnLabel(handPickerBtn, '');
+  setPickerBtnLabel(dealerPickerBtn, '');
   document.getElementById('noteInput').value = '';
   document.querySelectorAll('.btn-group button').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.field-error').forEach(e => e.classList.remove('show'));
   document.getElementById('submitBtn').textContent = '記録する';
+}
+
+function setPickerBtnLabel(btn, value) {
+  btn.textContent = value || '選択してください';
+  btn.classList.toggle('placeholder', !value);
+}
+
+// --- Drum-style wheel picker (used for 完成した役 and ディーラー) ---
+let pickerContext = null;
+
+function openPicker(title, options, currentValue, onConfirm, opts = {}) {
+  pickerContext = { options: [...options], allowAdd: !!opts.allowAdd, onConfirm };
+  pickerTitle.textContent = title;
+  renderPickerOptions(currentValue);
+  pickerOverlay.classList.add('show');
+}
+
+function closePicker() {
+  pickerOverlay.classList.remove('show');
+  pickerContext = null;
+}
+
+function renderPickerOptions(selectedValue) {
+  const list = pickerContext.options;
+  let html = list.map((v, i) => `<div class="picker-item" data-idx="${i}">${escapeHtml(v)}</div>`).join('');
+  if (pickerContext.allowAdd) {
+    html += `<div class="picker-item" data-idx="add">＋ 新しく追加する</div>`;
+  }
+  pickerWheel.innerHTML = html;
+  let idx = list.indexOf(selectedValue);
+  if (idx === -1) idx = 0;
+  pickerWheel.scrollTop = idx * PICKER_ITEM_HEIGHT;
+  updateActivePickerItem();
+}
+
+function currentPickerIndex() {
+  const items = pickerWheel.querySelectorAll('.picker-item');
+  const idx = Math.round(pickerWheel.scrollTop / PICKER_ITEM_HEIGHT);
+  return Math.min(Math.max(idx, 0), items.length - 1);
+}
+
+function updateActivePickerItem() {
+  const items = pickerWheel.querySelectorAll('.picker-item');
+  const idx = currentPickerIndex();
+  items.forEach((el, i) => el.classList.toggle('active', i === idx));
+}
+
+let pickerScrollTimer = null;
+pickerWheel.addEventListener('scroll', () => {
+  updateActivePickerItem();
+  clearTimeout(pickerScrollTimer);
+  pickerScrollTimer = setTimeout(() => {
+    pickerWheel.scrollTo({ top: currentPickerIndex() * PICKER_ITEM_HEIGHT, behavior: 'smooth' });
+    updateActivePickerItem();
+  }, 120);
+});
+
+pickerCancelBtn.addEventListener('click', closePicker);
+pickerOverlay.addEventListener('click', (ev) => {
+  if (ev.target === pickerOverlay) closePicker();
+});
+
+pickerDoneBtn.addEventListener('click', () => {
+  if (!pickerContext) return;
+  const items = pickerWheel.querySelectorAll('.picker-item');
+  const idx = currentPickerIndex();
+  const item = items[idx];
+  if (!item) { closePicker(); return; }
+  if (item.dataset.idx === 'add') {
+    const name = window.prompt('新しいディーラー名を入力してください');
+    if (name && name.trim()) {
+      addDealer(name.trim());
+      pickerContext.options = [...dealers];
+      renderPickerOptions(name.trim());
+    }
+    return;
+  }
+  const value = pickerContext.options[Number(item.dataset.idx)];
+  const onConfirm = pickerContext.onConfirm;
+  closePicker();
+  onConfirm(value);
+});
+
+handPickerBtn.addEventListener('click', () => {
+  openPicker('完成した役', HAND_OPTIONS, state.hand, (val) => {
+    state.hand = val;
+    setPickerBtnLabel(handPickerBtn, val);
+  });
+});
+
+dealerPickerBtn.addEventListener('click', () => {
+  openPicker('ディーラー', dealers, state.dealer, (val) => {
+    state.dealer = val;
+    setPickerBtnLabel(dealerPickerBtn, val);
+  }, { allowAdd: true });
+});
+
+function loadDealers() {
+  try {
+    const raw = localStorage.getItem(DEALER_STORAGE_KEY);
+    dealers = raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    dealers = [];
+  }
+}
+
+function saveDealers() {
+  localStorage.setItem(DEALER_STORAGE_KEY, JSON.stringify(dealers));
+}
+
+function addDealer(name) {
+  if (!dealers.includes(name)) {
+    dealers.push(name);
+    saveDealers();
+  }
 }
 
 toggleFormBtn.addEventListener('click', () => {
@@ -436,7 +667,8 @@ function renderEntries() {
       </div>
       <div class="entry-details">
         クォリファイ: <b>${e.qualify === 'yes' ? 'あり' : 'なし'}</b><br>
-        役: <b>${e.hand || '—'}</b>
+        役: <b>${e.hand ? escapeHtml(e.hand) : '—'}</b><br>
+        ディーラー: <b>${e.dealer ? escapeHtml(e.dealer) : '—'}</b>
       </div>
       ${e.note ? `<div class="entry-note">${escapeHtml(e.note)}</div>` : ''}
       <div class="entry-time">${formatDate(e.createdAt)}</div>
@@ -463,10 +695,13 @@ window.editEntry = function(id) {
   state.mult = e.mult;
   state.result = e.result;
   state.qualify = e.qualify;
+  state.hand = e.hand || '';
+  state.dealer = e.dealer || '';
   document.querySelector(`#multGroup button[data-val="${e.mult}"]`).classList.add('active');
   document.querySelector(`#resultGroup button[data-val="${e.result}"]`).classList.add('active');
   document.querySelector(`#qualifyGroup button[data-val="${e.qualify}"]`).classList.add('active');
-  document.getElementById('handSelect').value = e.hand || '';
+  setPickerBtnLabel(handPickerBtn, state.hand);
+  setPickerBtnLabel(dealerPickerBtn, state.dealer);
   document.getElementById('noteInput').value = e.note || '';
   document.getElementById('submitBtn').textContent = '更新する';
   form.style.display = 'block';
@@ -500,13 +735,14 @@ form.addEventListener('submit', (ev) => {
   if (!state.qualify) { document.getElementById('qualifyError').classList.add('show'); valid = false; }
   if (!valid) return;
 
-  const hand = document.getElementById('handSelect').value;
+  const hand = state.hand;
+  const dealer = state.dealer;
   const note = document.getElementById('noteInput').value;
 
   if (editingId) {
     const idx = entries.findIndex(e => e.id === editingId);
     if (idx !== -1) {
-      entries[idx] = { ...entries[idx], mult: state.mult, result: state.result, qualify: state.qualify, hand, note };
+      entries[idx] = { ...entries[idx], mult: state.mult, result: state.result, qualify: state.qualify, hand, dealer, note };
     }
   } else {
     entries.push({
@@ -515,6 +751,7 @@ form.addEventListener('submit', (ev) => {
       result: state.result,
       qualify: state.qualify,
       hand,
+      dealer,
       note,
       createdAt: new Date().toISOString(),
     });
@@ -529,6 +766,7 @@ form.addEventListener('submit', (ev) => {
 });
 
 loadEntries();
+loadDealers();
 renderEntries();
 renderSummary();
 </script>
