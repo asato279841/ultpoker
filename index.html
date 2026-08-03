@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>アルティメットポーカー記録</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --card: #1a2233;
+    --card-border: #2a3550;
+    --accent: #d4af37;
+    --accent-dim: #8a7226;
+    --text: #eef1f7;
+    --text-dim: #9aa5bb;
+    --win: #3ba55d;
+    --lose: #e05252;
+    --push: #7a8ba3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 16px;
+    padding-bottom: 60px;
+  }
+  h1 {
+    font-size: 1.3rem;
+    margin: 4px 0 4px;
+    text-align: center;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+  }
+  .subtitle {
+    text-align: center;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    margin-bottom: 16px;
+  }
+  .summary {
+    display: flex;
+    justify-content: space-around;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 16px;
+    font-size: 0.85rem;
+  }
+  .summary div { text-align: center; }
+  .summary .num { font-size: 1.2rem; font-weight: bold; display: block; }
+  .win-color { color: var(--win); }
+  .lose-color { color: var(--lose); }
+  .accent-color { color: var(--accent); }
+
+  form {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  .field { margin-bottom: 14px; }
+  label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .field-error {
+    font-size: 0.75rem;
+    color: var(--lose);
+    margin-top: 6px;
+    display: none;
+  }
+  .field-error.show { display: block; }
+  .btn-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .btn-group button {
+    flex: 1;
+    min-width: 60px;
+    padding: 10px 6px;
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    background: #222b40;
+    color: var(--text);
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-group button.active {
+    background: var(--accent);
+    color: #16202f;
+    border-color: var(--accent);
+  }
+  .btn-group.win-lose button[data-val="win"].active {
+    background: var(--win); border-color: var(--win); color: #fff;
+  }
+  .btn-group.win-lose button[data-val="lose"].active {
+    background: var(--lose); border-color: var(--lose); color: #fff;
+  }
+  .btn-group.win-lose button[data-val="push"].active {
+    background: var(--push); border-color: var(--push); color: #fff;
+  }
+  select {
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    background: #222b40;
+    color: var(--text);
+    font-size: 0.95rem;
+  }
+  textarea {
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    background: #222b40;
+    color: var(--text);
+    font-size: 0.9rem;
+    resize: vertical;
+    min-height: 40px;
+    font-family: inherit;
+  }
+  .submit-btn {
+    width: 100%;
+    padding: 13px;
+    border-radius: 10px;
+    border: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent-dim));
+    color: #16202f;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 4px;
+  }
+  .cancel-btn {
+    width: 100%;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--card-border);
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    margin-top: 8px;
+    cursor: pointer;
+  }
+
+  .entry-list h2 {
+    font-size: 1rem;
+    color: var(--text-dim);
+    margin: 0 0 10px 2px;
+    font-weight: 500;
+  }
+  .entry {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-left: 4px solid var(--push);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  .entry.result-win { border-left-color: var(--win); }
+  .entry.result-lose { border-left-color: var(--lose); }
+  .entry-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .entry-mult {
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--accent);
+  }
+  .entry-result {
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+  }
+  .entry-result.win { background: rgba(59,165,93,0.2); color: var(--win); }
+  .entry-result.lose { background: rgba(224,82,82,0.2); color: var(--lose); }
+  .entry-result.push { background: rgba(122,139,163,0.2); color: var(--push); }
+  .entry-details {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+  .entry-details b { color: var(--text); }
+  .entry-note {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    margin-top: 6px;
+    white-space: pre-wrap;
+    border-top: 1px solid var(--card-border);
+    padding-top: 6px;
+  }
+  .entry-time {
+    font-size: 0.72rem;
+    color: #566078;
+    margin-top: 4px;
+  }
+  .entry-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .entry-actions button {
+    flex: 1;
+    padding: 7px;
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    background: #222b40;
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+  .entry-actions button.edit { color: var(--accent); }
+  .entry-actions button.delete { color: var(--lose); }
+  .entry-actions button.confirm-delete {
+    background: var(--lose);
+    border-color: var(--lose);
+    color: #fff;
+    font-weight: 700;
+  }
+
+  .empty-msg {
+    text-align: center;
+    color: var(--text-dim);
+    padding: 30px 0;
+    font-size: 0.9rem;
+  }
+  .toggle-form-btn {
+    width: 100%;
+    padding: 13px;
+    border-radius: 10px;
+    border: none;
+    background: var(--accent);
+    color: #16202f;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    margin-bottom: 16px;
+  }
+</style>
+</head>
+<body>
+
+<h1>♠ アルティメットポーカー記録 ♥</h1>
+<div class="subtitle">このブラウザ内に保存されます（通信なし・完全オフライン）</div>
+
+<div class="summary" id="summary"></div>
+
+<button class="toggle-form-btn" id="toggleFormBtn">＋ 新しく記録する</button>
+
+<form id="entryForm" style="display:none;">
+  <input type="hidden" id="editingId" value="">
+
+  <div class="field">
+    <label>プレイ倍率</label>
+    <div class="btn-group" id="multGroup">
+      <button type="button" data-val="4">x4</button>
+      <button type="button" data-val="2">x2</button>
+      <button type="button" data-val="1">x1</button>
+      <button type="button" data-val="0">x0</button>
+    </div>
+    <div class="field-error" id="multError">プレイ倍率を選択してください</div>
+  </div>
+
+  <div class="field">
+    <label>勝敗</label>
+    <div class="btn-group win-lose" id="resultGroup">
+      <button type="button" data-val="win">勝ち</button>
+      <button type="button" data-val="lose">負け</button>
+      <button type="button" data-val="push">プッシュ</button>
+    </div>
+    <div class="field-error" id="resultError">勝敗を選択してください</div>
+  </div>
+
+  <div class="field">
+    <label>クォリファイ</label>
+    <div class="btn-group" id="qualifyGroup">
+      <button type="button" data-val="yes">あり</button>
+      <button type="button" data-val="no">なし</button>
+    </div>
+    <div class="field-error" id="qualifyError">クォリファイの有無を選択してください</div>
+  </div>
+
+  <div class="field">
+    <label>完成した役</label>
+    <select id="handSelect">
+      <option value="">選択してください</option>
+      <option value="ハイカード">ハイカード</option>
+      <option value="ペア">ペア</option>
+      <option value="ツーペア">ツーペア</option>
+      <option value="スリーカード">スリーカード</option>
+      <option value="ストレート">ストレート</option>
+      <option value="フラッシュ">フラッシュ</option>
+      <option value="フルハウス">フルハウス</option>
+      <option value="フォーカード">フォーカード</option>
+      <option value="ストレートフラッシュ">ストレートフラッシュ</option>
+      <option value="ロイヤルフラッシュ">ロイヤルフラッシュ</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label>メモ（任意）</label>
+    <textarea id="noteInput" placeholder="ベット額や状況など自由に"></textarea>
+  </div>
+
+  <button type="submit" class="submit-btn" id="submitBtn">記録する</button>
+  <button type="button" class="cancel-btn" id="cancelBtn">キャンセル</button>
+</form>
+
+<div class="entry-list">
+  <h2>記録一覧</h2>
+  <div id="entries"></div>
+</div>
+
+<script>
+const STORAGE_KEY = 'ultimate_poker_entries_v1';
+
+let state = { mult: null, result: null, qualify: null };
+let entries = [];
+let editingId = null;
+let deleteConfirmId = null;
+
+const form = document.getElementById('entryForm');
+const toggleFormBtn = document.getElementById('toggleFormBtn');
+const cancelBtn = document.getElementById('cancelBtn');
+const entriesDiv = document.getElementById('entries');
+const summaryDiv = document.getElementById('summary');
+
+function setupBtnGroup(groupId, stateKey, errorId) {
+  const group = document.getElementById(groupId);
+  group.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      group.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state[stateKey] = btn.dataset.val;
+      if (errorId) document.getElementById(errorId).classList.remove('show');
+    });
+  });
+}
+setupBtnGroup('multGroup', 'mult', 'multError');
+setupBtnGroup('resultGroup', 'result', 'resultError');
+setupBtnGroup('qualifyGroup', 'qualify', 'qualifyError');
+
+function resetForm() {
+  state = { mult: null, result: null, qualify: null };
+  editingId = null;
+  document.getElementById('editingId').value = '';
+  document.getElementById('handSelect').value = '';
+  document.getElementById('noteInput').value = '';
+  document.querySelectorAll('.btn-group button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.field-error').forEach(e => e.classList.remove('show'));
+  document.getElementById('submitBtn').textContent = '記録する';
+}
+
+toggleFormBtn.addEventListener('click', () => {
+  resetForm();
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+  toggleFormBtn.style.display = form.style.display === 'none' ? 'block' : 'none';
+});
+
+cancelBtn.addEventListener('click', () => {
+  form.style.display = 'none';
+  toggleFormBtn.style.display = 'block';
+  resetForm();
+});
+
+// --- Storage: plain localStorage, synchronous, no network involved. ---
+function loadEntries() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    entries = raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    entries = [];
+  }
+}
+
+function saveEntries() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+}
+
+function renderSummary() {
+  const total = entries.length;
+  const wins = entries.filter(e => e.result === 'win').length;
+  const losses = entries.filter(e => e.result === 'lose').length;
+  const rate = total > 0 ? Math.round((wins / total) * 100) : 0;
+  summaryDiv.innerHTML = `
+    <div><span class="num accent-color">${total}</span>回数</div>
+    <div><span class="num win-color">${wins}</span>勝ち</div>
+    <div><span class="num lose-color">${losses}</span>負け</div>
+    <div><span class="num accent-color">${rate}%</span>勝率</div>
+  `;
+}
+
+function resultLabel(r) {
+  if (r === 'win') return '勝ち';
+  if (r === 'lose') return '負け';
+  return 'プッシュ';
+}
+
+function formatDate(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function renderEntries() {
+  if (entries.length === 0) {
+    entriesDiv.innerHTML = '<div class="empty-msg">まだ記録がありません</div>';
+    return;
+  }
+  const sorted = [...entries].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  entriesDiv.innerHTML = sorted.map(e => {
+    const confirming = deleteConfirmId === e.id;
+    return `
+    <div class="entry result-${e.result}">
+      <div class="entry-top">
+        <span class="entry-mult">x${e.mult}</span>
+        <span class="entry-result ${e.result}">${resultLabel(e.result)}</span>
+      </div>
+      <div class="entry-details">
+        クォリファイ: <b>${e.qualify === 'yes' ? 'あり' : 'なし'}</b><br>
+        役: <b>${e.hand || '—'}</b>
+      </div>
+      ${e.note ? `<div class="entry-note">${escapeHtml(e.note)}</div>` : ''}
+      <div class="entry-time">${formatDate(e.createdAt)}</div>
+      <div class="entry-actions">
+        ${confirming ? `
+          <button class="confirm-delete" onclick="confirmDelete('${e.id}')">本当に削除する</button>
+          <button onclick="cancelDelete()">やめる</button>
+        ` : `
+          <button class="edit" onclick="editEntry('${e.id}')">編集</button>
+          <button class="delete" onclick="askDelete('${e.id}')">削除</button>
+        `}
+      </div>
+    </div>
+  `;
+  }).join('');
+}
+
+window.editEntry = function(id) {
+  const e = entries.find(en => en.id === id);
+  if (!e) return;
+  resetForm();
+  editingId = id;
+  document.getElementById('editingId').value = id;
+  state.mult = e.mult;
+  state.result = e.result;
+  state.qualify = e.qualify;
+  document.querySelector(`#multGroup button[data-val="${e.mult}"]`).classList.add('active');
+  document.querySelector(`#resultGroup button[data-val="${e.result}"]`).classList.add('active');
+  document.querySelector(`#qualifyGroup button[data-val="${e.qualify}"]`).classList.add('active');
+  document.getElementById('handSelect').value = e.hand || '';
+  document.getElementById('noteInput').value = e.note || '';
+  document.getElementById('submitBtn').textContent = '更新する';
+  form.style.display = 'block';
+  toggleFormBtn.style.display = 'none';
+  window.scrollTo({top: 0, behavior: 'smooth'});
+};
+
+window.askDelete = function(id) {
+  deleteConfirmId = id;
+  renderEntries();
+};
+
+window.cancelDelete = function() {
+  deleteConfirmId = null;
+  renderEntries();
+};
+
+window.confirmDelete = function(id) {
+  entries = entries.filter(e => e.id !== id);
+  deleteConfirmId = null;
+  saveEntries();
+  renderEntries();
+  renderSummary();
+};
+
+form.addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  let valid = true;
+  if (!state.mult) { document.getElementById('multError').classList.add('show'); valid = false; }
+  if (!state.result) { document.getElementById('resultError').classList.add('show'); valid = false; }
+  if (!state.qualify) { document.getElementById('qualifyError').classList.add('show'); valid = false; }
+  if (!valid) return;
+
+  const hand = document.getElementById('handSelect').value;
+  const note = document.getElementById('noteInput').value;
+
+  if (editingId) {
+    const idx = entries.findIndex(e => e.id === editingId);
+    if (idx !== -1) {
+      entries[idx] = { ...entries[idx], mult: state.mult, result: state.result, qualify: state.qualify, hand, note };
+    }
+  } else {
+    entries.push({
+      id: 'e_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+      mult: state.mult,
+      result: state.result,
+      qualify: state.qualify,
+      hand,
+      note,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  saveEntries();
+  renderEntries();
+  renderSummary();
+  resetForm();
+  form.style.display = 'none';
+  toggleFormBtn.style.display = 'block';
+});
+
+loadEntries();
+renderEntries();
+renderSummary();
+</script>
+
+</body>
+</html>
