@@ -346,6 +346,43 @@
     border-bottom: 1px solid var(--card-border);
     pointer-events: none;
   }
+
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+  }
+  .filter-bar label {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .filter-bar select {
+    flex: 1;
+  }
+
+  .profit-banner {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 16px;
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+  .profit-banner .profit-num {
+    display: block;
+    font-size: 1.7rem;
+    font-weight: 800;
+    margin-top: 4px;
+  }
 </style>
 </head>
 <body>
@@ -353,7 +390,14 @@
 <h1>♠ アルティメットポーカー記録 ♥</h1>
 <div class="subtitle">このブラウザ内に保存されます（通信なし・完全オフライン）</div>
 
+<div class="filter-bar">
+  <label for="dealerFilterSelect">ディーラーで絞り込む</label>
+  <select id="dealerFilterSelect"></select>
+</div>
+
 <div class="summary" id="summary"></div>
+
+<div class="profit-banner" id="profitBanner"></div>
 
 <button class="toggle-form-btn" id="toggleFormBtn">＋ 新しく記録する</button>
 
@@ -431,20 +475,47 @@
 <script>
 const STORAGE_KEY = 'ultimate_poker_entries_v1';
 const DEALER_STORAGE_KEY = 'ultimate_poker_dealers_v1';
-const HAND_OPTIONS = ['ハイカード', 'ペア', 'ツーペア', 'スリーカード', 'ストレート', 'フラッシュ', 'フルハウス', 'フォーカード', 'ストレートフラッシュ', 'ロイヤルフラッシュ'];
+const HAND_OPTIONS = ['ハイカード', 'ワンペア', 'ツーペア', 'スリーカード', 'ストレート', 'フラッシュ', 'フルハウス', 'フォーカード', 'ストレートフラッシュ', 'ロイヤルフラッシュ'];
 const PICKER_ITEM_HEIGHT = 44;
+
+// Ultimate Texas Hold'em unit sizes: ante = blind = 1, trips side bet = 0.2.
+const ANTE_UNIT = 1;
+const BLIND_UNIT = 1;
+const TRIPS_UNIT = 0.2;
+
+// "X to 1" payout multipliers. A hand missing from a table loses that bet.
+const TRIPS_PAYOUTS = {
+  'ロイヤルフラッシュ': 100,
+  'ストレートフラッシュ': 50,
+  'フォーカード': 25,
+  'フルハウス': 8,
+  'フラッシュ': 6,
+  'ストレート': 4,
+  'スリーカード': 3,
+};
+const BLIND_PAYOUTS = {
+  'ロイヤルフラッシュ': 500,
+  'ストレートフラッシュ': 50,
+  'フォーカード': 10,
+  'フルハウス': 3,
+  'フラッシュ': 2,
+  'ストレート': 1,
+};
 
 let state = { mult: null, result: null, qualify: null, hand: '', dealer: '' };
 let entries = [];
 let dealers = [];
 let editingId = null;
 let deleteConfirmId = null;
+let currentDealerFilter = 'all';
 
 const form = document.getElementById('entryForm');
 const toggleFormBtn = document.getElementById('toggleFormBtn');
 const cancelBtn = document.getElementById('cancelBtn');
 const entriesDiv = document.getElementById('entries');
 const summaryDiv = document.getElementById('summary');
+const profitBanner = document.getElementById('profitBanner');
+const dealerFilterSelect = document.getElementById('dealerFilterSelect');
 const handPickerBtn = document.getElementById('handPickerBtn');
 const dealerPickerBtn = document.getElementById('dealerPickerBtn');
 const pickerOverlay = document.getElementById('pickerOverlay');
@@ -615,16 +686,96 @@ function loadEntries() {
   } catch (e) {
     entries = [];
   }
+  // Older records used "ペア" before it was renamed to "ワンペア".
+  let migrated = false;
+  entries.forEach(e => {
+    if (e.hand === 'ペア') {
+      e.hand = 'ワンペア';
+      migrated = true;
+    }
+  });
+  if (migrated) saveEntries();
 }
 
 function saveEntries() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
 }
 
-function renderSummary() {
-  const total = entries.length;
-  const wins = entries.filter(e => e.result === 'win').length;
-  const losses = entries.filter(e => e.result === 'lose').length;
+// Ante/Blind push on a tie, lose on a loss, and on a win: Ante pays 1:1 only if
+// the dealer qualified, Blind pays via BLIND_PAYOUTS only for a straight or
+// better (otherwise it just pushes). Play always follows the win/lose/push
+// result at the recorded multiplier. Trips is independent of the hand result
+// and pays via TRIPS_PAYOUTS based on the completed hand alone.
+function computeProfit(e) {
+  const mult = Number(e.mult) || 0;
+  let ante = 0;
+  let blind = 0;
+  let play = 0;
+  let trips = 0;
+
+  if (e.result === 'lose') {
+    ante = -ANTE_UNIT;
+    blind = -BLIND_UNIT;
+    play = -mult;
+  } else if (e.result === 'win') {
+    ante = e.qualify === 'yes' ? ANTE_UNIT : 0;
+    play = mult;
+    blind = BLIND_PAYOUTS[e.hand] ? BLIND_UNIT * BLIND_PAYOUTS[e.hand] : 0;
+  }
+
+  if (e.hand) {
+    trips = TRIPS_PAYOUTS[e.hand] ? TRIPS_UNIT * TRIPS_PAYOUTS[e.hand] : -TRIPS_UNIT;
+  }
+
+  return ante + blind + play + trips;
+}
+
+function getFilteredEntries() {
+  if (currentDealerFilter === 'all') return entries;
+  if (currentDealerFilter === '__unset__') return entries.filter(e => !e.dealer);
+  return entries.filter(e => e.dealer === currentDealerFilter);
+}
+
+function populateDealerFilterOptions() {
+  const hasUnset = entries.some(e => !e.dealer);
+  dealerFilterSelect.innerHTML = '';
+  const allOpt = document.createElement('option');
+  allOpt.value = 'all';
+  allOpt.textContent = 'すべて';
+  dealerFilterSelect.appendChild(allOpt);
+  if (hasUnset) {
+    const unsetOpt = document.createElement('option');
+    unsetOpt.value = '__unset__';
+    unsetOpt.textContent = '未設定';
+    dealerFilterSelect.appendChild(unsetOpt);
+  }
+  dealers.forEach(d => {
+    const opt = document.createElement('option');
+    opt.value = d;
+    opt.textContent = d;
+    dealerFilterSelect.appendChild(opt);
+  });
+  const values = Array.from(dealerFilterSelect.options).map(o => o.value);
+  if (!values.includes(currentDealerFilter)) currentDealerFilter = 'all';
+  dealerFilterSelect.value = currentDealerFilter;
+}
+
+dealerFilterSelect.addEventListener('change', () => {
+  currentDealerFilter = dealerFilterSelect.value;
+  refreshView();
+});
+
+function refreshView() {
+  populateDealerFilterOptions();
+  const filtered = getFilteredEntries();
+  renderEntries(filtered);
+  renderSummary(filtered);
+}
+
+function renderSummary(list) {
+  const total = list.length;
+  const wins = list.filter(e => e.result === 'win').length;
+  const losses = list.filter(e => e.result === 'lose').length;
   const rate = total > 0 ? Math.round((wins / total) * 100) : 0;
   summaryDiv.innerHTML = `
     <div><span class="num accent-color">${total}</span>回数</div>
@@ -632,6 +783,11 @@ function renderSummary() {
     <div><span class="num lose-color">${losses}</span>負け</div>
     <div><span class="num accent-color">${rate}%</span>勝率</div>
   `;
+
+  const profit = list.reduce((sum, e) => sum + computeProfit(e), 0);
+  const sign = profit > 0 ? '+' : '';
+  const cls = profit > 0 ? 'win-color' : profit < 0 ? 'lose-color' : 'accent-color';
+  profitBanner.innerHTML = `収支（ベット単位、Ante=Blind=1 / Trips=0.2）<span class="profit-num ${cls}">${sign}${profit.toFixed(1)}</span>`;
 }
 
 function resultLabel(r) {
@@ -651,14 +807,17 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function renderEntries() {
-  if (entries.length === 0) {
+function renderEntries(list) {
+  if (list.length === 0) {
     entriesDiv.innerHTML = '<div class="empty-msg">まだ記録がありません</div>';
     return;
   }
-  const sorted = [...entries].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const sorted = [...list].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   entriesDiv.innerHTML = sorted.map(e => {
     const confirming = deleteConfirmId === e.id;
+    const profit = computeProfit(e);
+    const profitSign = profit > 0 ? '+' : '';
+    const profitClass = profit > 0 ? 'win-color' : profit < 0 ? 'lose-color' : '';
     return `
     <div class="entry result-${e.result}">
       <div class="entry-top">
@@ -668,7 +827,8 @@ function renderEntries() {
       <div class="entry-details">
         クォリファイ: <b>${e.qualify === 'yes' ? 'あり' : 'なし'}</b><br>
         役: <b>${e.hand ? escapeHtml(e.hand) : '—'}</b><br>
-        ディーラー: <b>${e.dealer ? escapeHtml(e.dealer) : '—'}</b>
+        ディーラー: <b>${e.dealer ? escapeHtml(e.dealer) : '—'}</b><br>
+        収支: <b class="${profitClass}">${profitSign}${profit.toFixed(1)}</b>
       </div>
       ${e.note ? `<div class="entry-note">${escapeHtml(e.note)}</div>` : ''}
       <div class="entry-time">${formatDate(e.createdAt)}</div>
@@ -711,20 +871,19 @@ window.editEntry = function(id) {
 
 window.askDelete = function(id) {
   deleteConfirmId = id;
-  renderEntries();
+  renderEntries(getFilteredEntries());
 };
 
 window.cancelDelete = function() {
   deleteConfirmId = null;
-  renderEntries();
+  renderEntries(getFilteredEntries());
 };
 
 window.confirmDelete = function(id) {
   entries = entries.filter(e => e.id !== id);
   deleteConfirmId = null;
   saveEntries();
-  renderEntries();
-  renderSummary();
+  refreshView();
 };
 
 form.addEventListener('submit', (ev) => {
@@ -758,8 +917,7 @@ form.addEventListener('submit', (ev) => {
   }
 
   saveEntries();
-  renderEntries();
-  renderSummary();
+  refreshView();
   resetForm();
   form.style.display = 'none';
   toggleFormBtn.style.display = 'block';
@@ -767,8 +925,7 @@ form.addEventListener('submit', (ev) => {
 
 loadEntries();
 loadDealers();
-renderEntries();
-renderSummary();
+refreshView();
 </script>
 
 </body>
