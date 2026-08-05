@@ -83,7 +83,7 @@
   }
   .btn-group button {
     flex: 1;
-    min-width: 60px;
+    min-width: 48px;
     padding: 10px 6px;
     border-radius: 8px;
     border: 1px solid var(--card-border);
@@ -408,6 +408,7 @@
     <label>プレイ倍率</label>
     <div class="btn-group" id="multGroup">
       <button type="button" data-val="4">x4</button>
+      <button type="button" data-val="3">x3</button>
       <button type="button" data-val="2">x2</button>
       <button type="button" data-val="1">x1</button>
       <button type="button" data-val="0">x0</button>
@@ -415,7 +416,7 @@
     <div class="field-error" id="multError">プレイ倍率を選択してください</div>
   </div>
 
-  <div class="field">
+  <div class="field" id="resultField">
     <label>勝敗</label>
     <div class="btn-group win-lose" id="resultGroup">
       <button type="button" data-val="win">勝ち</button>
@@ -425,7 +426,7 @@
     <div class="field-error" id="resultError">勝敗を選択してください</div>
   </div>
 
-  <div class="field">
+  <div class="field" id="qualifyField">
     <label>クォリファイ</label>
     <div class="btn-group" id="qualifyGroup">
       <button type="button" data-val="yes">あり</button>
@@ -435,8 +436,28 @@
   </div>
 
   <div class="field">
-    <label>完成した役</label>
-    <button type="button" class="picker-btn placeholder" id="handPickerBtn">選択してください</button>
+    <label>アンテ額（＝ブラインド額）</label>
+    <button type="button" class="picker-btn" id="antePickerBtn">選択してください</button>
+  </div>
+
+  <div class="field">
+    <label>完成した役（ブラインド・トリップス判定用）</label>
+    <button type="button" class="picker-btn" id="handPickerBtn">選択してください</button>
+  </div>
+
+  <div class="field">
+    <label>トリップス額</label>
+    <button type="button" class="picker-btn" id="tripsPickerBtn">選択してください</button>
+  </div>
+
+  <div class="field">
+    <label>6カードボーナス額</label>
+    <button type="button" class="picker-btn" id="sixCardBonusPickerBtn">選択してください</button>
+  </div>
+
+  <div class="field" id="sixCardHandField">
+    <label>6カードボーナスの役</label>
+    <button type="button" class="picker-btn" id="sixCardHandPickerBtn">選択してください</button>
   </div>
 
   <div class="field">
@@ -475,12 +496,21 @@
 <script>
 const STORAGE_KEY = 'ultimate_poker_entries_v1';
 const DEALER_STORAGE_KEY = 'ultimate_poker_dealers_v1';
-const HAND_OPTIONS = ['ハイカード', 'ワンペア', 'ツーペア', 'スリーカード', 'ストレート', 'フラッシュ', 'フルハウス', 'フォーカード', 'ストレートフラッシュ', 'ロイヤルフラッシュ'];
+const SESSION_DEFAULTS_KEY = 'ultimate_poker_session_defaults_v1';
+const HAND_OPTIONS = ['配当なし', 'スリーカード', 'ストレート', 'フラッシュ', 'フルハウス', 'フォーカード', 'ストレートフラッシュ', 'ロイヤルフラッシュ'];
+const SIX_CARD_HAND_OPTIONS = ['配当なし', 'スリーカード', '5枚ストレート', '5枚フラッシュ', 'フルハウス', 'フォーカード', '5枚ストレートフラッシュ', '5枚ロイヤルフラッシュ', '6枚ロイヤルフラッシュ'];
 const PICKER_ITEM_HEIGHT = 44;
 
-// Ultimate Texas Hold'em unit sizes: ante = blind = 1, trips side bet = 0.2.
+function numberRange(min, max, step) {
+  const arr = [];
+  for (let v = min; v <= max; v += step) arr.push(v);
+  return arr;
+}
+const ANTE_BET_OPTIONS = numberRange(10, 500, 10);
+const SIDE_BET_OPTIONS = [0, ...numberRange(5, 100, 5)];
+
+// Legacy fallback for entries recorded before real bet amounts were tracked.
 const ANTE_UNIT = 1;
-const BLIND_UNIT = 1;
 const TRIPS_UNIT = 0.2;
 
 // "X to 1" payout multipliers. A hand missing from a table loses that bet.
@@ -501,8 +531,20 @@ const BLIND_PAYOUTS = {
   'フラッシュ': 2,
   'ストレート': 1,
 };
+const SIX_CARD_BONUS_PAYOUTS = {
+  '5枚ロイヤルフラッシュ': 1000,
+  '5枚ストレートフラッシュ': 200,
+  'フォーカード': 50,
+  'フルハウス': 20,
+  '5枚フラッシュ': 15,
+  '5枚ストレート': 10,
+  'スリーカード': 5,
+};
+const SIX_CARD_BONUS_JACKPOT_HAND = '6枚ロイヤルフラッシュ';
+const SIX_CARD_BONUS_JACKPOT_AMOUNT = 100000;
 
-let state = { mult: null, result: null, qualify: null, hand: '', dealer: '' };
+let sessionDefaults = { dealer: '', anteBet: 10, tripsBet: 0, sixCardBonusBet: 0 };
+let state = { mult: null, result: null, qualify: null, hand: '配当なし', dealer: '', anteBet: 10, tripsBet: 0, sixCardBonusBet: 0, sixCardHand: '配当なし' };
 let entries = [];
 let dealers = [];
 let editingId = null;
@@ -516,8 +558,15 @@ const entriesDiv = document.getElementById('entries');
 const summaryDiv = document.getElementById('summary');
 const profitBanner = document.getElementById('profitBanner');
 const dealerFilterSelect = document.getElementById('dealerFilterSelect');
+const resultField = document.getElementById('resultField');
+const qualifyField = document.getElementById('qualifyField');
+const sixCardHandField = document.getElementById('sixCardHandField');
 const handPickerBtn = document.getElementById('handPickerBtn');
 const dealerPickerBtn = document.getElementById('dealerPickerBtn');
+const antePickerBtn = document.getElementById('antePickerBtn');
+const tripsPickerBtn = document.getElementById('tripsPickerBtn');
+const sixCardBonusPickerBtn = document.getElementById('sixCardBonusPickerBtn');
+const sixCardHandPickerBtn = document.getElementById('sixCardHandPickerBtn');
 const pickerOverlay = document.getElementById('pickerOverlay');
 const pickerWheel = document.getElementById('pickerWheel');
 const pickerTitle = document.getElementById('pickerTitle');
@@ -532,6 +581,7 @@ function setupBtnGroup(groupId, stateKey, errorId) {
       btn.classList.add('active');
       state[stateKey] = btn.dataset.val;
       if (errorId) document.getElementById(errorId).classList.remove('show');
+      if (groupId === 'multGroup') updateFoldVisibility();
     });
   });
 }
@@ -539,21 +589,56 @@ setupBtnGroup('multGroup', 'mult', 'multError');
 setupBtnGroup('resultGroup', 'result', 'resultError');
 setupBtnGroup('qualifyGroup', 'qualify', 'qualifyError');
 
+// Folding (x0) forfeits Ante/Blind outright, so win/lose and dealer qualify
+// never come into play — hide those fields and fix the values that
+// computeProfit needs.
+function updateFoldVisibility() {
+  const folded = state.mult === '0';
+  resultField.style.display = folded ? 'none' : '';
+  qualifyField.style.display = folded ? 'none' : '';
+  if (folded) {
+    state.result = 'lose';
+    state.qualify = null;
+    document.getElementById('resultError').classList.remove('show');
+    document.getElementById('qualifyError').classList.remove('show');
+  }
+}
+
+function updateSixCardHandVisibility() {
+  sixCardHandField.style.display = state.sixCardBonusBet > 0 ? '' : 'none';
+}
+
 function resetForm() {
-  state = { mult: null, result: null, qualify: null, hand: '', dealer: '' };
+  state = {
+    mult: null,
+    result: null,
+    qualify: null,
+    hand: '配当なし',
+    dealer: sessionDefaults.dealer,
+    anteBet: sessionDefaults.anteBet,
+    tripsBet: sessionDefaults.tripsBet,
+    sixCardBonusBet: sessionDefaults.sixCardBonusBet,
+    sixCardHand: '配当なし',
+  };
   editingId = null;
   document.getElementById('editingId').value = '';
-  setPickerBtnLabel(handPickerBtn, '');
-  setPickerBtnLabel(dealerPickerBtn, '');
+  setPickerBtnLabel(handPickerBtn, state.hand);
+  setPickerBtnLabel(dealerPickerBtn, state.dealer);
+  setPickerBtnLabel(antePickerBtn, String(state.anteBet));
+  setPickerBtnLabel(tripsPickerBtn, String(state.tripsBet));
+  setPickerBtnLabel(sixCardBonusPickerBtn, String(state.sixCardBonusBet));
+  setPickerBtnLabel(sixCardHandPickerBtn, state.sixCardHand);
   document.getElementById('noteInput').value = '';
   document.querySelectorAll('.btn-group button').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.field-error').forEach(e => e.classList.remove('show'));
   document.getElementById('submitBtn').textContent = '記録する';
+  updateFoldVisibility();
+  updateSixCardHandVisibility();
 }
 
 function setPickerBtnLabel(btn, value) {
-  btn.textContent = value || '選択してください';
-  btn.classList.toggle('placeholder', !value);
+  btn.textContent = (value === '' || value == null) ? '選択してください' : String(value);
+  btn.classList.toggle('placeholder', value === '' || value == null);
 }
 
 // --- Drum-style wheel picker (used for 完成した役 and ディーラー) ---
@@ -646,6 +731,35 @@ dealerPickerBtn.addEventListener('click', () => {
   }, { allowAdd: true });
 });
 
+antePickerBtn.addEventListener('click', () => {
+  openPicker('アンテ額（＝ブラインド額）', ANTE_BET_OPTIONS, state.anteBet, (val) => {
+    state.anteBet = val;
+    setPickerBtnLabel(antePickerBtn, String(val));
+  });
+});
+
+tripsPickerBtn.addEventListener('click', () => {
+  openPicker('トリップス額', SIDE_BET_OPTIONS, state.tripsBet, (val) => {
+    state.tripsBet = val;
+    setPickerBtnLabel(tripsPickerBtn, String(val));
+  });
+});
+
+sixCardBonusPickerBtn.addEventListener('click', () => {
+  openPicker('6カードボーナス額', SIDE_BET_OPTIONS, state.sixCardBonusBet, (val) => {
+    state.sixCardBonusBet = val;
+    setPickerBtnLabel(sixCardBonusPickerBtn, String(val));
+    updateSixCardHandVisibility();
+  });
+});
+
+sixCardHandPickerBtn.addEventListener('click', () => {
+  openPicker('6カードボーナスの役', SIX_CARD_HAND_OPTIONS, state.sixCardHand, (val) => {
+    state.sixCardHand = val;
+    setPickerBtnLabel(sixCardHandPickerBtn, val);
+  });
+});
+
 function loadDealers() {
   try {
     const raw = localStorage.getItem(DEALER_STORAGE_KEY);
@@ -664,6 +778,22 @@ function addDealer(name) {
     dealers.push(name);
     saveDealers();
   }
+}
+
+// Dealer/bet amounts carry over to the next new record for the rest of this
+// browser tab session (cleared once the tab closes), since they usually stay
+// the same hand after hand at the same table.
+function loadSessionDefaults() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_DEFAULTS_KEY);
+    if (raw) sessionDefaults = { ...sessionDefaults, ...JSON.parse(raw) };
+  } catch (e) {
+    // keep the hardcoded defaults
+  }
+}
+
+function saveSessionDefaults() {
+  sessionStorage.setItem(SESSION_DEFAULTS_KEY, JSON.stringify(sessionDefaults));
 }
 
 toggleFormBtn.addEventListener('click', () => {
@@ -702,33 +832,54 @@ function saveEntries() {
 }
 
 // Ante/Blind push on a tie, lose on a loss, and on a win: Ante pays 1:1 only if
-// the dealer qualified (otherwise it just pushes), Blind pays via
-// BLIND_PAYOUTS only for a straight or better (otherwise it just pushes) and
-// is unaffected by qualify. Play always follows the win/lose/push result at
-// the recorded multiplier. Trips is independent of the hand result and pays
-// via TRIPS_PAYOUTS based on the completed hand alone.
+// the dealer qualified (otherwise it just pushes), Blind (same size as Ante)
+// pays via BLIND_PAYOUTS only for a straight or better (otherwise it just
+// pushes) and is unaffected by qualify. Play always follows the win/lose/push
+// result at the recorded multiplier. Trips and the 6 Card Bonus are each
+// independent of the hand result and of each other: Trips pays via
+// TRIPS_PAYOUTS based on the completed 5-card hand, and the 6 Card Bonus pays
+// via SIX_CARD_BONUS_PAYOUTS based on the separately-recorded 6-card hand
+// (a 6-card Royal Flush is a flat jackpot regardless of bet size). Both are
+// skipped entirely when their bet is 0. Entries recorded before real bet
+// amounts existed fall back to the old fixed unit sizes so their previously
+// displayed profit doesn't change.
 function computeProfit(e) {
   const mult = Number(e.mult) || 0;
+  const anteBet = e.anteBet != null ? e.anteBet : ANTE_UNIT;
+  const tripsBet = e.tripsBet != null ? e.tripsBet : TRIPS_UNIT;
+  const sixCardBonusBet = e.sixCardBonusBet || 0;
+
   let ante = 0;
   let blind = 0;
   let play = 0;
   let trips = 0;
+  let sixCard = 0;
 
   if (e.result === 'lose') {
-    ante = -ANTE_UNIT;
-    blind = -BLIND_UNIT;
-    play = -mult;
+    ante = -anteBet;
+    blind = -anteBet;
+    play = -(anteBet * mult);
   } else if (e.result === 'win') {
-    ante = e.qualify === 'yes' ? ANTE_UNIT : 0;
-    play = mult;
-    blind = BLIND_PAYOUTS[e.hand] ? BLIND_UNIT * BLIND_PAYOUTS[e.hand] : 0;
+    ante = e.qualify === 'yes' ? anteBet : 0;
+    play = anteBet * mult;
+    blind = BLIND_PAYOUTS[e.hand] ? anteBet * BLIND_PAYOUTS[e.hand] : 0;
   }
 
-  if (e.hand) {
-    trips = TRIPS_PAYOUTS[e.hand] ? TRIPS_UNIT * TRIPS_PAYOUTS[e.hand] : -TRIPS_UNIT;
+  if (tripsBet > 0) {
+    trips = TRIPS_PAYOUTS[e.hand] ? tripsBet * TRIPS_PAYOUTS[e.hand] : -tripsBet;
   }
 
-  return ante + blind + play + trips;
+  if (sixCardBonusBet > 0) {
+    if (e.sixCardHand === SIX_CARD_BONUS_JACKPOT_HAND) {
+      sixCard = SIX_CARD_BONUS_JACKPOT_AMOUNT;
+    } else if (SIX_CARD_BONUS_PAYOUTS[e.sixCardHand]) {
+      sixCard = sixCardBonusBet * SIX_CARD_BONUS_PAYOUTS[e.sixCardHand];
+    } else {
+      sixCard = -sixCardBonusBet;
+    }
+  }
+
+  return ante + blind + play + trips + sixCard;
 }
 
 function getFilteredEntries() {
@@ -788,12 +939,20 @@ function renderSummary(list) {
   const profit = list.reduce((sum, e) => sum + computeProfit(e), 0);
   const sign = profit > 0 ? '+' : '';
   const cls = profit > 0 ? 'win-color' : profit < 0 ? 'lose-color' : 'accent-color';
-  profitBanner.innerHTML = `収支（ベット単位、Ante=Blind=1 / Trips=0.2）<span class="profit-num ${cls}">${sign}${profit.toFixed(1)}</span>`;
+  profitBanner.innerHTML = `収支（アンテ・トリップス・6カードボーナスの実ベット額ベース）<span class="profit-num ${cls}">${sign}${formatProfit(profit)}</span>`;
 }
 
-function resultLabel(r) {
-  if (r === 'win') return '勝ち';
-  if (r === 'lose') return '負け';
+// Rounds away binary floating-point noise (e.g. from legacy 0.2-unit trips
+// bets) before formatting with thousands separators.
+function formatProfit(n) {
+  const rounded = Math.round(n * 100) / 100;
+  return rounded.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function resultLabel(e) {
+  if (String(e.mult) === '0') return 'フォールド';
+  if (e.result === 'win') return '勝ち';
+  if (e.result === 'lose') return '負け';
   return 'プッシュ';
 }
 
@@ -819,17 +978,25 @@ function renderEntries(list) {
     const profit = computeProfit(e);
     const profitSign = profit > 0 ? '+' : '';
     const profitClass = profit > 0 ? 'win-color' : profit < 0 ? 'lose-color' : '';
+    const folded = String(e.mult) === '0';
+    const badgeClass = folded ? 'lose' : e.result;
+    const anteBet = e.anteBet != null ? e.anteBet : ANTE_UNIT;
+    const tripsBet = e.tripsBet != null ? e.tripsBet : TRIPS_UNIT;
+    const sixCardBonusBet = e.sixCardBonusBet || 0;
     return `
     <div class="entry result-${e.result}">
       <div class="entry-top">
         <span class="entry-mult">x${e.mult}</span>
-        <span class="entry-result ${e.result}">${resultLabel(e.result)}</span>
+        <span class="entry-result ${badgeClass}">${resultLabel(e)}</span>
       </div>
       <div class="entry-details">
-        クォリファイ: <b>${e.qualify === 'yes' ? 'あり' : 'なし'}</b><br>
-        役: <b>${e.hand ? escapeHtml(e.hand) : '—'}</b><br>
+        ${folded ? '' : `クォリファイ: <b>${e.qualify === 'yes' ? 'あり' : 'なし'}</b><br>`}
+        アンテ額: <b>${formatProfit(anteBet)}</b><br>
+        役: <b>${escapeHtml(e.hand || '配当なし')}</b><br>
+        ${tripsBet > 0 ? `トリップス額: <b>${formatProfit(tripsBet)}</b><br>` : ''}
+        ${sixCardBonusBet > 0 ? `6カードボーナス額: <b>${formatProfit(sixCardBonusBet)}</b><br>6カードボーナスの役: <b>${escapeHtml(e.sixCardHand || '配当なし')}</b><br>` : ''}
         ディーラー: <b>${e.dealer ? escapeHtml(e.dealer) : '—'}</b><br>
-        収支: <b class="${profitClass}">${profitSign}${profit.toFixed(1)}</b>
+        収支: <b class="${profitClass}">${profitSign}${formatProfit(profit)}</b>
       </div>
       ${e.note ? `<div class="entry-note">${escapeHtml(e.note)}</div>` : ''}
       <div class="entry-time">${formatDate(e.createdAt)}</div>
@@ -856,15 +1023,27 @@ window.editEntry = function(id) {
   state.mult = e.mult;
   state.result = e.result;
   state.qualify = e.qualify;
-  state.hand = e.hand || '';
+  state.hand = e.hand || '配当なし';
   state.dealer = e.dealer || '';
+  state.anteBet = e.anteBet != null ? e.anteBet : ANTE_UNIT;
+  state.tripsBet = e.tripsBet != null ? e.tripsBet : TRIPS_UNIT;
+  state.sixCardBonusBet = e.sixCardBonusBet || 0;
+  state.sixCardHand = e.sixCardHand || '配当なし';
   document.querySelector(`#multGroup button[data-val="${e.mult}"]`).classList.add('active');
-  document.querySelector(`#resultGroup button[data-val="${e.result}"]`).classList.add('active');
-  document.querySelector(`#qualifyGroup button[data-val="${e.qualify}"]`).classList.add('active');
+  const resultBtn = document.querySelector(`#resultGroup button[data-val="${e.result}"]`);
+  if (resultBtn) resultBtn.classList.add('active');
+  const qualifyBtn = document.querySelector(`#qualifyGroup button[data-val="${e.qualify}"]`);
+  if (qualifyBtn) qualifyBtn.classList.add('active');
   setPickerBtnLabel(handPickerBtn, state.hand);
   setPickerBtnLabel(dealerPickerBtn, state.dealer);
+  setPickerBtnLabel(antePickerBtn, String(state.anteBet));
+  setPickerBtnLabel(tripsPickerBtn, String(state.tripsBet));
+  setPickerBtnLabel(sixCardBonusPickerBtn, String(state.sixCardBonusBet));
+  setPickerBtnLabel(sixCardHandPickerBtn, state.sixCardHand);
   document.getElementById('noteInput').value = e.note || '';
   document.getElementById('submitBtn').textContent = '更新する';
+  updateFoldVisibility();
+  updateSixCardHandVisibility();
   form.style.display = 'block';
   toggleFormBtn.style.display = 'none';
   window.scrollTo({top: 0, behavior: 'smooth'});
@@ -889,33 +1068,30 @@ window.confirmDelete = function(id) {
 
 form.addEventListener('submit', (ev) => {
   ev.preventDefault();
+  const folded = state.mult === '0';
   let valid = true;
   if (!state.mult) { document.getElementById('multError').classList.add('show'); valid = false; }
-  if (!state.result) { document.getElementById('resultError').classList.add('show'); valid = false; }
-  if (!state.qualify) { document.getElementById('qualifyError').classList.add('show'); valid = false; }
+  if (!folded && !state.result) { document.getElementById('resultError').classList.add('show'); valid = false; }
+  if (!folded && !state.qualify) { document.getElementById('qualifyError').classList.add('show'); valid = false; }
   if (!valid) return;
 
-  const hand = state.hand;
-  const dealer = state.dealer;
+  const { hand, dealer, anteBet, tripsBet, sixCardBonusBet, sixCardHand } = state;
   const note = document.getElementById('noteInput').value;
+  const fields = { mult: state.mult, result: state.result, qualify: state.qualify, hand, dealer, anteBet, tripsBet, sixCardBonusBet, sixCardHand, note };
 
   if (editingId) {
     const idx = entries.findIndex(e => e.id === editingId);
-    if (idx !== -1) {
-      entries[idx] = { ...entries[idx], mult: state.mult, result: state.result, qualify: state.qualify, hand, dealer, note };
-    }
+    if (idx !== -1) entries[idx] = { ...entries[idx], ...fields };
   } else {
     entries.push({
       id: 'e_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-      mult: state.mult,
-      result: state.result,
-      qualify: state.qualify,
-      hand,
-      dealer,
-      note,
+      ...fields,
       createdAt: new Date().toISOString(),
     });
   }
+
+  sessionDefaults = { dealer, anteBet, tripsBet, sixCardBonusBet };
+  saveSessionDefaults();
 
   saveEntries();
   refreshView();
@@ -926,6 +1102,7 @@ form.addEventListener('submit', (ev) => {
 
 loadEntries();
 loadDealers();
+loadSessionDefaults();
 refreshView();
 </script>
 
