@@ -400,12 +400,42 @@
     text-align: center;
     cursor: pointer;
   }
+
+  .data-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .data-btn {
+    flex: 1;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--card-border);
+    background: var(--card);
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .data-note {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    margin-bottom: 16px;
+    line-height: 1.5;
+  }
 </style>
 </head>
 <body>
 
 <h1>♠ アルティメットポーカー記録 ♥</h1>
 <div class="subtitle">このブラウザ内に保存されます（通信なし・完全オフライン）</div>
+
+<div class="data-actions">
+  <button type="button" class="data-btn" id="exportBtn">バックアップを保存</button>
+  <button type="button" class="data-btn" id="importBtn">バックアップから復元</button>
+</div>
+<div class="data-note">ホーム画面へのアイコンの追加をやり直すと記録が引き継がれないことがあります。定期的にバックアップの保存をおすすめします。</div>
+<input type="file" id="importFileInput" accept="application/json,.json" style="display:none">
 
 <div class="filter-bar">
   <label for="dealerFilterSelect">ディーラーで絞り込む</label>
@@ -514,7 +544,7 @@
 // Bump this on every deploy. Used to detect a stale cached copy — this
 // matters most for "Add to Home Screen" launches, which tend to reopen a
 // cached page instead of hitting the network like a normal browser tab.
-const APP_VERSION = '2026-08-06.1';
+const APP_VERSION = '2026-08-06.2';
 
 const STORAGE_KEY = 'ultimate_poker_entries_v1';
 const DEALER_STORAGE_KEY = 'ultimate_poker_dealers_v1';
@@ -580,6 +610,9 @@ const entriesDiv = document.getElementById('entries');
 const summaryDiv = document.getElementById('summary');
 const profitBanner = document.getElementById('profitBanner');
 const dealerFilterSelect = document.getElementById('dealerFilterSelect');
+const exportBtn = document.getElementById('exportBtn');
+const importBtn = document.getElementById('importBtn');
+const importFileInput = document.getElementById('importFileInput');
 const resultField = document.getElementById('resultField');
 const qualifyField = document.getElementById('qualifyField');
 const sixCardHandField = document.getElementById('sixCardHandField');
@@ -817,6 +850,62 @@ function loadSessionDefaults() {
 function saveSessionDefaults() {
   sessionStorage.setItem(SESSION_DEFAULTS_KEY, JSON.stringify(sessionDefaults));
 }
+
+// Manual backup/restore, since localStorage isn't guaranteed to survive
+// re-adding this page to a phone's home screen (iOS in particular can give a
+// re-added icon a fresh, empty storage area separate from the old one).
+function exportData() {
+  const payload = { version: APP_VERSION, exportedAt: new Date().toISOString(), entries, dealers };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ultimate_poker_backup_${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Merges by entry id rather than replacing, so restoring into a store that
+// already has some entries (e.g. two devices used in parallel) doesn't lose
+// anything on either side.
+function importDataFromFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let data;
+    try {
+      data = JSON.parse(reader.result);
+    } catch (e) {
+      window.alert('ファイルの読み込みに失敗しました。バックアップファイルか確認してください。');
+      return;
+    }
+    const importedEntries = Array.isArray(data.entries) ? data.entries : [];
+    const importedDealers = Array.isArray(data.dealers) ? data.dealers : [];
+    const existingIds = new Set(entries.map(e => e.id));
+    let addedCount = 0;
+    importedEntries.forEach(e => {
+      if (e && e.id && !existingIds.has(e.id)) {
+        entries.push(e);
+        existingIds.add(e.id);
+        addedCount++;
+      }
+    });
+    importedDealers.forEach(d => addDealer(d));
+    saveEntries();
+    refreshView();
+    window.alert(`${addedCount}件の記録を復元しました（すでにある記録と重複するものはスキップしました）`);
+  };
+  reader.readAsText(file);
+}
+
+exportBtn.addEventListener('click', exportData);
+importBtn.addEventListener('click', () => importFileInput.click());
+importFileInput.addEventListener('change', () => {
+  const file = importFileInput.files[0];
+  if (file) importDataFromFile(file);
+  importFileInput.value = '';
+});
 
 toggleFormBtn.addEventListener('click', () => {
   resetForm();
