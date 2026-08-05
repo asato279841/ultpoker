@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>アルティメットポーカー記録</title>
 <style>
   :root {
@@ -383,6 +386,20 @@
     font-weight: 800;
     margin-top: 4px;
   }
+
+  .update-banner {
+    position: sticky;
+    top: 0;
+    z-index: 2000;
+    margin: -16px -16px 16px;
+    padding: 12px 16px;
+    background: var(--accent);
+    color: #16202f;
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-align: center;
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -494,6 +511,11 @@
 </div>
 
 <script>
+// Bump this on every deploy. Used to detect a stale cached copy — this
+// matters most for "Add to Home Screen" launches, which tend to reopen a
+// cached page instead of hitting the network like a normal browser tab.
+const APP_VERSION = '2026-08-06.1';
+
 const STORAGE_KEY = 'ultimate_poker_entries_v1';
 const DEALER_STORAGE_KEY = 'ultimate_poker_dealers_v1';
 const SESSION_DEFAULTS_KEY = 'ultimate_poker_session_defaults_v1';
@@ -1100,10 +1122,42 @@ form.addEventListener('submit', (ev) => {
   toggleFormBtn.style.display = 'block';
 });
 
+// "Add to Home Screen" launches tend to reopen a cached copy of this page
+// rather than checking the network the way a normal browser tab would, so a
+// deployed update can otherwise go unnoticed indefinitely. Re-fetch the page
+// bypassing the cache whenever the app becomes visible again and prompt to
+// reload if a newer APP_VERSION is found.
+async function checkForUpdate() {
+  try {
+    const res = await fetch(location.pathname + '?_=' + Date.now(), { cache: 'no-store' });
+    const text = await res.text();
+    const match = text.match(/APP_VERSION\s*=\s*'([^']+)'/);
+    if (match && match[1] !== APP_VERSION) showUpdateBanner();
+  } catch (e) {
+    // offline, or the fetch was blocked — nothing actionable to do
+  }
+}
+
+function showUpdateBanner() {
+  if (document.getElementById('updateBanner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'updateBanner';
+  banner.className = 'update-banner';
+  banner.textContent = '新しいバージョンがあります。タップして更新';
+  banner.addEventListener('click', () => location.reload());
+  document.body.prepend(banner);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkForUpdate();
+});
+window.addEventListener('pageshow', checkForUpdate);
+
 loadEntries();
 loadDealers();
 loadSessionDefaults();
 refreshView();
+checkForUpdate();
 </script>
 
 </body>
