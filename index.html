@@ -638,7 +638,7 @@
 // Bump this on every deploy. Used to detect a stale cached copy — this
 // matters most for "Add to Home Screen" launches, which tend to reopen a
 // cached page instead of hitting the network like a normal browser tab.
-const APP_VERSION = '2026-08-06.3';
+const APP_VERSION = '2026-08-06.4';
 
 const STORAGE_KEY = 'ultimate_poker_entries_v1';
 const DEALER_STORAGE_KEY = 'ultimate_poker_dealers_v1';
@@ -1111,18 +1111,22 @@ function saveEntries() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
 }
 
-// Ante/Blind push on a tie, lose on a loss, and on a win: Ante pays 1:1 only if
-// the dealer qualified (otherwise it just pushes), Blind (same size as Ante)
-// pays via BLIND_PAYOUTS only for a straight or better (otherwise it just
-// pushes) and is unaffected by qualify. Play always follows the win/lose/push
-// result at the recorded multiplier. Trips and the 6 Card Bonus are each
-// independent of the hand result and of each other: Trips pays via
-// TRIPS_PAYOUTS based on the completed 5-card hand, and the 6 Card Bonus pays
-// via SIX_CARD_BONUS_PAYOUTS based on the separately-recorded 6-card hand
-// (a 6-card Royal Flush is a flat jackpot regardless of bet size). Both are
-// skipped entirely when their bet is 0. Entries recorded before real bet
-// amounts existed fall back to the old fixed unit sizes so their previously
-// displayed profit doesn't change.
+// Play and Blind (same size as Ante) are decided purely by the win/lose/push
+// hand comparison, regardless of dealer qualify: lose forfeits them, push
+// returns them, and on a win Play pays 1:1 while Blind pays via
+// BLIND_PAYOUTS only for a straight or better (otherwise it just pushes).
+// Ante instead is decided purely by whether the dealer qualified: if not, it
+// always pushes even if the hand comparison was a loss (the dealer's
+// non-qualifying hand can still beat a weaker player hand and take Blind/
+// Play while Ante is protected); if the dealer did qualify, Ante follows the
+// same win/lose/push comparison as everything else. Trips and the 6 Card
+// Bonus are each independent of the hand result and of each other: Trips
+// pays via TRIPS_PAYOUTS based on the completed 5-card hand, and the 6 Card
+// Bonus pays via SIX_CARD_BONUS_PAYOUTS based on the separately-recorded
+// 6-card hand (a 6-card Royal Flush is a flat jackpot regardless of bet
+// size). Both are skipped entirely when their bet is 0. Entries recorded
+// before real bet amounts existed fall back to the old fixed unit sizes so
+// their previously displayed profit doesn't change.
 function computeProfit(e) {
   const mult = Number(e.mult) || 0;
   const anteBet = e.anteBet != null ? e.anteBet : ANTE_UNIT;
@@ -1136,13 +1140,19 @@ function computeProfit(e) {
   let sixCard = 0;
 
   if (e.result === 'lose') {
-    ante = -anteBet;
     blind = -anteBet;
     play = -(anteBet * mult);
   } else if (e.result === 'win') {
-    ante = e.qualify === 'yes' ? anteBet : 0;
     play = anteBet * mult;
     blind = BLIND_PAYOUTS[e.hand] ? anteBet * BLIND_PAYOUTS[e.hand] : 0;
+  }
+
+  if (e.qualify === 'no') {
+    ante = 0;
+  } else if (e.result === 'lose') {
+    ante = -anteBet;
+  } else if (e.result === 'win') {
+    ante = anteBet;
   }
 
   if (tripsBet > 0) {
