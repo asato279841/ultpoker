@@ -423,6 +423,91 @@
     margin-bottom: 16px;
     line-height: 1.5;
   }
+
+  .view-tabs {
+    margin-bottom: 16px;
+  }
+
+  .hand-range-title {
+    text-align: center;
+    color: var(--accent);
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+  .hand-range-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    margin-bottom: 14px;
+  }
+  .hand-range-grid {
+    border-collapse: collapse;
+  }
+  .hand-range-grid th,
+  .hand-range-grid td {
+    width: 46px;
+    height: 46px;
+    text-align: center;
+    padding: 0;
+  }
+  .hand-range-grid th {
+    position: sticky;
+    top: 0;
+    background: var(--card);
+    color: var(--accent);
+    font-size: 0.85rem;
+    z-index: 1;
+  }
+  .hand-range-grid th.corner {
+    left: 0;
+    z-index: 2;
+  }
+  .hand-range-grid td.rank-label {
+    position: sticky;
+    left: 0;
+    background: var(--card);
+    color: var(--accent);
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+  .hand-range-cell {
+    font-size: 0.62rem;
+    line-height: 1.3;
+    color: #fff;
+    font-weight: 700;
+  }
+  .hand-range-cell.raise { background: var(--lose); }
+  .hand-range-cell.check { background: var(--card-border); }
+  .hand-range-cell.pair { box-shadow: inset 0 0 0 2px var(--accent); }
+  .hand-range-cell .sub { display: block; font-weight: 500; opacity: 0.85; }
+
+  .hand-range-legend {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+  .hand-range-legend-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .hand-range-swatch {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .hand-range-swatch span.box {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+  }
+  .hand-range-swatch .raise-box { background: var(--lose); }
+  .hand-range-swatch .check-box { background: var(--card-border); }
+  .hand-range-swatch .pair-box { background: transparent; box-shadow: inset 0 0 0 2px var(--accent); }
 </style>
 </head>
 <body>
@@ -430,6 +515,12 @@
 <h1>♠ アルティメットポーカー記録 ♥</h1>
 <div class="subtitle">このブラウザ内に保存されます（通信なし・完全オフライン）</div>
 
+<div class="btn-group view-tabs" id="viewTabs">
+  <button type="button" data-view="records" class="active">記録</button>
+  <button type="button" data-view="handrange">ハンドレンジ表</button>
+</div>
+
+<div id="recordsView">
 <div class="data-actions">
   <button type="button" class="data-btn" id="exportBtn">バックアップを保存</button>
   <button type="button" class="data-btn" id="importBtn">バックアップから復元</button>
@@ -539,12 +630,15 @@
   <h2>記録一覧</h2>
   <div id="entries"></div>
 </div>
+</div>
+
+<div id="handRangeView" style="display:none;"></div>
 
 <script>
 // Bump this on every deploy. Used to detect a stale cached copy — this
 // matters most for "Add to Home Screen" launches, which tend to reopen a
 // cached page instead of hitting the network like a normal browser tab.
-const APP_VERSION = '2026-08-06.2';
+const APP_VERSION = '2026-08-06.3';
 
 const STORAGE_KEY = 'ultimate_poker_entries_v1';
 const DEALER_STORAGE_KEY = 'ultimate_poker_dealers_v1';
@@ -552,6 +646,68 @@ const SESSION_DEFAULTS_KEY = 'ultimate_poker_session_defaults_v1';
 const HAND_OPTIONS = ['配当なし', 'スリーカード', 'ストレート', 'フラッシュ', 'フルハウス', 'フォーカード', 'ストレートフラッシュ', 'ロイヤルフラッシュ'];
 const SIX_CARD_HAND_OPTIONS = ['配当なし', 'スリーカード', '5枚ストレート', '5枚フラッシュ', 'フルハウス', 'フォーカード', '5枚ストレートフラッシュ', '5枚ロイヤルフラッシュ', '6枚ロイヤルフラッシュ'];
 const PICKER_ITEM_HEIGHT = 44;
+
+// Preflop hand-range chart (Ultimate Texas Hold'em). Rows/cols both ranked
+// A,K,Q,...,2. '1' = raise 4x, '0' = check. Transcribed by sampling each
+// cell's background pixel color from the reference chart image, then
+// verified against its own caption ("every Ace hand raises" and "every pair
+// 33+ raises, only 22 checks") — both checks passed exactly.
+const HAND_RANGE_RANKS = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
+const HAND_RANGE_RAISE = [
+  '1111111111111', // A
+  '1111111111111', // K
+  '1111111110000', // Q
+  '1111111000000', // J
+  '1111100000000', // T
+  '1110010000000', // 9
+  '1110001000000', // 8
+  '1100000100000', // 7
+  '1100000010000', // 6
+  '1100000001000', // 5
+  '1000000000100', // 4
+  '1000000000010', // 3
+  '1000000000000', // 2
+];
+
+function handRangeLabel(rowRank, colRank, rowIdx, colIdx) {
+  if (rowIdx === colIdx) return rowRank + rowRank;
+  if (colIdx > rowIdx) return rowRank + colRank + 's';
+  return colRank + rowRank + 'o';
+}
+
+function renderHandRangeGrid() {
+  const headerCells = HAND_RANGE_RANKS.map(r => `<th>${r}</th>`).join('');
+  const bodyRows = HAND_RANGE_RANKS.map((rowRank, rowIdx) => {
+    const cells = HAND_RANGE_RANKS.map((colRank, colIdx) => {
+      const isRaise = HAND_RANGE_RAISE[rowIdx][colIdx] === '1';
+      const isPair = rowIdx === colIdx;
+      const label = handRangeLabel(rowRank, colRank, rowIdx, colIdx);
+      const cls = ['hand-range-cell', isRaise ? 'raise' : 'check', isPair ? 'pair' : ''].join(' ').trim();
+      return `<td class="${cls}">${label}<span class="sub">${isRaise ? '4x' : 'C'}</span></td>`;
+    }).join('');
+    return `<tr><td class="rank-label">${rowRank}</td>${cells}</tr>`;
+  }).join('');
+
+  handRangeView.innerHTML = `
+    <div class="hand-range-title">ホールカード2枚で即判断</div>
+    <div class="hand-range-wrap">
+      <table class="hand-range-grid">
+        <thead><tr><th class="corner"></th>${headerCells}</tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>
+    <div class="hand-range-legend">
+      <div class="hand-range-legend-row">
+        <span class="hand-range-swatch"><span class="box raise-box"></span>4xレイズ</span>
+        <span class="hand-range-swatch"><span class="box check-box"></span>チェック</span>
+        <span class="hand-range-swatch"><span class="box pair-box"></span>ペア</span>
+      </div>
+      <div>上三角 = スーテッド(s) ／ 下三角 = オフスーテッド(o) ／ 対角線 = ポケットペア</div>
+      <div>※ 22のみチェック、33以上のペアとエース系はすべて4x</div>
+      <div>House Edge ≈ 2.2%（Ante + Blind, optimal play）</div>
+    </div>
+  `;
+}
 
 function numberRange(min, max, step) {
   const arr = [];
@@ -603,6 +759,9 @@ let editingId = null;
 let deleteConfirmId = null;
 let currentDealerFilter = 'all';
 
+const viewTabs = document.getElementById('viewTabs');
+const recordsView = document.getElementById('recordsView');
+const handRangeView = document.getElementById('handRangeView');
 const form = document.getElementById('entryForm');
 const toggleFormBtn = document.getElementById('toggleFormBtn');
 const cancelBtn = document.getElementById('cancelBtn');
@@ -643,6 +802,16 @@ function setupBtnGroup(groupId, stateKey, errorId) {
 setupBtnGroup('multGroup', 'mult', 'multError');
 setupBtnGroup('resultGroup', 'result', 'resultError');
 setupBtnGroup('qualifyGroup', 'qualify', 'qualifyError');
+
+viewTabs.querySelectorAll('button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    viewTabs.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const isRecords = btn.dataset.view === 'records';
+    recordsView.style.display = isRecords ? '' : 'none';
+    handRangeView.style.display = isRecords ? 'none' : '';
+  });
+});
 
 // Folding (x0) forfeits Ante/Blind outright, so win/lose and dealer qualify
 // never come into play — hide those fields and fix the values that
@@ -1246,6 +1415,7 @@ loadEntries();
 loadDealers();
 loadSessionDefaults();
 refreshView();
+renderHandRangeGrid();
 checkForUpdate();
 </script>
 
