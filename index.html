@@ -370,6 +370,61 @@
     flex: 1;
   }
 
+  .filter-toggle-btn {
+    width: 100%;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--card-border);
+    background: var(--card);
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 12px;
+  }
+  .advanced-filter {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 14px;
+    margin-top: -6px;
+    margin-bottom: 12px;
+  }
+  .advanced-filter .btn-group button {
+    font-size: 0.85rem;
+    padding: 8px 4px;
+  }
+  .range-inputs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .range-inputs input {
+    flex: 1;
+    min-width: 0;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    background: #222b40;
+    color: var(--text);
+    font-size: 0.85rem;
+  }
+  .range-inputs span {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+  }
+  .clear-filter-btn {
+    width: 100%;
+    padding: 9px;
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    cursor: pointer;
+    margin-top: 4px;
+  }
+
   .profit-banner {
     background: var(--card);
     border: 1px solid var(--card-border);
@@ -533,6 +588,37 @@
   <select id="dealerFilterSelect"></select>
 </div>
 
+<button type="button" class="filter-toggle-btn" id="advancedFilterToggle">詳細フィルター ▾</button>
+<div class="advanced-filter" id="advancedFilter" style="display:none;">
+  <div class="field">
+    <label>プレイ倍率</label>
+    <div class="btn-group" id="multFilterGroup">
+      <button type="button" data-val="4">x4</button>
+      <button type="button" data-val="3">x3</button>
+      <button type="button" data-val="2">x2</button>
+      <button type="button" data-val="1">x1</button>
+      <button type="button" data-val="0">x0</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>期間（開始・終了どちらか片方だけでも可）</label>
+    <div class="range-inputs">
+      <input type="datetime-local" id="dateFilterStart">
+      <span>〜</span>
+      <input type="datetime-local" id="dateFilterEnd">
+    </div>
+  </div>
+  <div class="field">
+    <label>収支の範囲（マイナス値も入力可、片方だけでも可）</label>
+    <div class="range-inputs">
+      <input type="number" id="profitFilterMin" placeholder="最小">
+      <span>〜</span>
+      <input type="number" id="profitFilterMax" placeholder="最大">
+    </div>
+  </div>
+  <button type="button" class="clear-filter-btn" id="clearAdvancedFilterBtn">絞り込みをクリア</button>
+</div>
+
 <div class="summary" id="summary"></div>
 
 <div class="profit-banner" id="profitBanner"></div>
@@ -638,7 +724,7 @@
 // Bump this on every deploy. Used to detect a stale cached copy — this
 // matters most for "Add to Home Screen" launches, which tend to reopen a
 // cached page instead of hitting the network like a normal browser tab.
-const APP_VERSION = '2026-08-06.4';
+const APP_VERSION = '2026-08-06.5';
 
 const STORAGE_KEY = 'ultimate_poker_entries_v1';
 const DEALER_STORAGE_KEY = 'ultimate_poker_dealers_v1';
@@ -758,6 +844,7 @@ let dealers = [];
 let editingId = null;
 let deleteConfirmId = null;
 let currentDealerFilter = 'all';
+let multFilterSet = new Set();
 
 const viewTabs = document.getElementById('viewTabs');
 const recordsView = document.getElementById('recordsView');
@@ -769,6 +856,14 @@ const entriesDiv = document.getElementById('entries');
 const summaryDiv = document.getElementById('summary');
 const profitBanner = document.getElementById('profitBanner');
 const dealerFilterSelect = document.getElementById('dealerFilterSelect');
+const advancedFilterToggle = document.getElementById('advancedFilterToggle');
+const advancedFilter = document.getElementById('advancedFilter');
+const multFilterGroup = document.getElementById('multFilterGroup');
+const dateFilterStart = document.getElementById('dateFilterStart');
+const dateFilterEnd = document.getElementById('dateFilterEnd');
+const profitFilterMin = document.getElementById('profitFilterMin');
+const profitFilterMax = document.getElementById('profitFilterMax');
+const clearAdvancedFilterBtn = document.getElementById('clearAdvancedFilterBtn');
 const exportBtn = document.getElementById('exportBtn');
 const importBtn = document.getElementById('importBtn');
 const importFileInput = document.getElementById('importFileInput');
@@ -1173,10 +1268,94 @@ function computeProfit(e) {
 }
 
 function getFilteredEntries() {
-  if (currentDealerFilter === 'all') return entries;
-  if (currentDealerFilter === '__unset__') return entries.filter(e => !e.dealer);
-  return entries.filter(e => e.dealer === currentDealerFilter);
+  let list = entries;
+
+  if (currentDealerFilter === '__unset__') {
+    list = list.filter(e => !e.dealer);
+  } else if (currentDealerFilter !== 'all') {
+    list = list.filter(e => e.dealer === currentDealerFilter);
+  }
+
+  if (multFilterSet.size > 0) {
+    list = list.filter(e => multFilterSet.has(String(e.mult)));
+  }
+
+  if (dateFilterStart.value) {
+    const startTime = new Date(dateFilterStart.value).getTime();
+    list = list.filter(e => new Date(e.createdAt).getTime() >= startTime);
+  }
+  if (dateFilterEnd.value) {
+    const endTime = new Date(dateFilterEnd.value).getTime();
+    list = list.filter(e => new Date(e.createdAt).getTime() <= endTime);
+  }
+
+  if (profitFilterMin.value !== '') {
+    const min = parseFloat(profitFilterMin.value);
+    list = list.filter(e => computeProfit(e) >= min);
+  }
+  if (profitFilterMax.value !== '') {
+    const max = parseFloat(profitFilterMax.value);
+    list = list.filter(e => computeProfit(e) <= max);
+  }
+
+  return list;
 }
+
+function countActiveAdvancedFilters() {
+  let count = 0;
+  if (multFilterSet.size > 0) count++;
+  if (dateFilterStart.value) count++;
+  if (dateFilterEnd.value) count++;
+  if (profitFilterMin.value !== '') count++;
+  if (profitFilterMax.value !== '') count++;
+  return count;
+}
+
+function updateAdvancedFilterToggleLabel() {
+  const expanded = advancedFilter.style.display !== 'none';
+  const count = countActiveAdvancedFilters();
+  const badge = count > 0 ? `（${count}件適用中）` : '';
+  advancedFilterToggle.textContent = `詳細フィルター${badge} ${expanded ? '▴' : '▾'}`;
+}
+
+advancedFilterToggle.addEventListener('click', () => {
+  const isHidden = advancedFilter.style.display === 'none';
+  advancedFilter.style.display = isHidden ? '' : 'none';
+  updateAdvancedFilterToggleLabel();
+});
+
+multFilterGroup.querySelectorAll('button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const val = btn.dataset.val;
+    if (multFilterSet.has(val)) {
+      multFilterSet.delete(val);
+      btn.classList.remove('active');
+    } else {
+      multFilterSet.add(val);
+      btn.classList.add('active');
+    }
+    updateAdvancedFilterToggleLabel();
+    refreshView();
+  });
+});
+
+[dateFilterStart, dateFilterEnd, profitFilterMin, profitFilterMax].forEach(input => {
+  input.addEventListener('input', () => {
+    updateAdvancedFilterToggleLabel();
+    refreshView();
+  });
+});
+
+clearAdvancedFilterBtn.addEventListener('click', () => {
+  multFilterSet.clear();
+  multFilterGroup.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+  dateFilterStart.value = '';
+  dateFilterEnd.value = '';
+  profitFilterMin.value = '';
+  profitFilterMax.value = '';
+  updateAdvancedFilterToggleLabel();
+  refreshView();
+});
 
 function populateDealerFilterOptions() {
   const hasUnset = entries.some(e => !e.dealer);
@@ -1424,6 +1603,7 @@ window.addEventListener('pageshow', checkForUpdate);
 loadEntries();
 loadDealers();
 loadSessionDefaults();
+updateAdvancedFilterToggleLabel();
 refreshView();
 renderHandRangeGrid();
 checkForUpdate();
