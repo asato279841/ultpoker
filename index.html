@@ -616,6 +616,30 @@
       <input type="number" id="profitFilterMax" placeholder="最大">
     </div>
   </div>
+  <div class="field">
+    <label>アンテ額（＝ブラインド額）の範囲（片方だけでも可）</label>
+    <div class="range-inputs">
+      <input type="number" id="anteFilterMin" placeholder="最小">
+      <span>〜</span>
+      <input type="number" id="anteFilterMax" placeholder="最大">
+    </div>
+  </div>
+  <div class="field">
+    <label>トリップス額の範囲（片方だけでも可）</label>
+    <div class="range-inputs">
+      <input type="number" id="tripsFilterMin" placeholder="最小">
+      <span>〜</span>
+      <input type="number" id="tripsFilterMax" placeholder="最大">
+    </div>
+  </div>
+  <div class="field">
+    <label>6カードボーナス額の範囲（片方だけでも可）</label>
+    <div class="range-inputs">
+      <input type="number" id="sixCardBonusFilterMin" placeholder="最小">
+      <span>〜</span>
+      <input type="number" id="sixCardBonusFilterMax" placeholder="最大">
+    </div>
+  </div>
   <button type="button" class="clear-filter-btn" id="clearAdvancedFilterBtn">絞り込みをクリア</button>
 </div>
 
@@ -724,7 +748,7 @@
 // Bump this on every deploy. Used to detect a stale cached copy — this
 // matters most for "Add to Home Screen" launches, which tend to reopen a
 // cached page instead of hitting the network like a normal browser tab.
-const APP_VERSION = '2026-08-06.5';
+const APP_VERSION = '2026-08-06.6';
 
 const STORAGE_KEY = 'ultimate_poker_entries_v1';
 const DEALER_STORAGE_KEY = 'ultimate_poker_dealers_v1';
@@ -863,6 +887,12 @@ const dateFilterStart = document.getElementById('dateFilterStart');
 const dateFilterEnd = document.getElementById('dateFilterEnd');
 const profitFilterMin = document.getElementById('profitFilterMin');
 const profitFilterMax = document.getElementById('profitFilterMax');
+const anteFilterMin = document.getElementById('anteFilterMin');
+const anteFilterMax = document.getElementById('anteFilterMax');
+const tripsFilterMin = document.getElementById('tripsFilterMin');
+const tripsFilterMax = document.getElementById('tripsFilterMax');
+const sixCardBonusFilterMin = document.getElementById('sixCardBonusFilterMin');
+const sixCardBonusFilterMax = document.getElementById('sixCardBonusFilterMax');
 const clearAdvancedFilterBtn = document.getElementById('clearAdvancedFilterBtn');
 const exportBtn = document.getElementById('exportBtn');
 const importBtn = document.getElementById('importBtn');
@@ -1267,6 +1297,19 @@ function computeProfit(e) {
   return ante + blind + play + trips + sixCard;
 }
 
+function entryAnteBet(e) { return e.anteBet != null ? e.anteBet : ANTE_UNIT; }
+function entryTripsBet(e) { return e.tripsBet != null ? e.tripsBet : TRIPS_UNIT; }
+function entrySixCardBonusBet(e) { return e.sixCardBonusBet || 0; }
+
+// Range filter pairs sharing the same min/max/getter shape, reused by both
+// getFilteredEntries and countActiveAdvancedFilters so the two can't drift.
+const RANGE_FILTERS = [
+  { min: profitFilterMin, max: profitFilterMax, getValue: computeProfit },
+  { min: anteFilterMin, max: anteFilterMax, getValue: entryAnteBet },
+  { min: tripsFilterMin, max: tripsFilterMax, getValue: entryTripsBet },
+  { min: sixCardBonusFilterMin, max: sixCardBonusFilterMax, getValue: entrySixCardBonusBet },
+];
+
 function getFilteredEntries() {
   let list = entries;
 
@@ -1289,14 +1332,16 @@ function getFilteredEntries() {
     list = list.filter(e => new Date(e.createdAt).getTime() <= endTime);
   }
 
-  if (profitFilterMin.value !== '') {
-    const min = parseFloat(profitFilterMin.value);
-    list = list.filter(e => computeProfit(e) >= min);
-  }
-  if (profitFilterMax.value !== '') {
-    const max = parseFloat(profitFilterMax.value);
-    list = list.filter(e => computeProfit(e) <= max);
-  }
+  RANGE_FILTERS.forEach(({ min, max, getValue }) => {
+    if (min.value !== '') {
+      const minVal = parseFloat(min.value);
+      list = list.filter(e => getValue(e) >= minVal);
+    }
+    if (max.value !== '') {
+      const maxVal = parseFloat(max.value);
+      list = list.filter(e => getValue(e) <= maxVal);
+    }
+  });
 
   return list;
 }
@@ -1306,8 +1351,10 @@ function countActiveAdvancedFilters() {
   if (multFilterSet.size > 0) count++;
   if (dateFilterStart.value) count++;
   if (dateFilterEnd.value) count++;
-  if (profitFilterMin.value !== '') count++;
-  if (profitFilterMax.value !== '') count++;
+  RANGE_FILTERS.forEach(({ min, max }) => {
+    if (min.value !== '') count++;
+    if (max.value !== '') count++;
+  });
   return count;
 }
 
@@ -1339,7 +1386,8 @@ multFilterGroup.querySelectorAll('button').forEach(btn => {
   });
 });
 
-[dateFilterStart, dateFilterEnd, profitFilterMin, profitFilterMax].forEach(input => {
+const advancedFilterInputs = [dateFilterStart, dateFilterEnd, ...RANGE_FILTERS.flatMap(({ min, max }) => [min, max])];
+advancedFilterInputs.forEach(input => {
   input.addEventListener('input', () => {
     updateAdvancedFilterToggleLabel();
     refreshView();
@@ -1351,8 +1399,7 @@ clearAdvancedFilterBtn.addEventListener('click', () => {
   multFilterGroup.querySelectorAll('button').forEach(b => b.classList.remove('active'));
   dateFilterStart.value = '';
   dateFilterEnd.value = '';
-  profitFilterMin.value = '';
-  profitFilterMax.value = '';
+  RANGE_FILTERS.forEach(({ min, max }) => { min.value = ''; max.value = ''; });
   updateAdvancedFilterToggleLabel();
   refreshView();
 });
