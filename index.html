@@ -751,7 +751,7 @@
 // Bump this on every deploy. Used to detect a stale cached copy — this
 // matters most for "Add to Home Screen" launches, which tend to reopen a
 // cached page instead of hitting the network like a normal browser tab.
-const APP_VERSION = '2026-08-06.7';
+const APP_VERSION = '2026-08-06.8';
 
 const STORAGE_KEY = 'ultimate_poker_entries_v1';
 const DEALER_STORAGE_KEY = 'ultimate_poker_dealers_v1';
@@ -871,8 +871,6 @@ let deleteConfirmId = null;
 let currentDealerFilter = 'all';
 let multFilterSet = new Set();
 
-const pageTitle = document.getElementById('pageTitle');
-const pageSubtitle = document.getElementById('pageSubtitle');
 const viewTabs = document.getElementById('viewTabs');
 const recordsView = document.getElementById('recordsView');
 const handRangeView = document.getElementById('handRangeView');
@@ -938,11 +936,10 @@ viewTabs.querySelectorAll('button').forEach(btn => {
     const isRecords = btn.dataset.view === 'records';
     recordsView.style.display = isRecords ? '' : 'none';
     handRangeView.style.display = isRecords ? 'none' : '';
-    // The title/subtitle and the records list's extra bottom padding only
-    // earn their space while browsing records — drop them so the hand range
-    // chart has a shot at fitting on one screen without scrolling.
-    pageTitle.style.display = isRecords ? '' : 'none';
-    pageSubtitle.style.display = isRecords ? '' : 'none';
+    // The records list's extra bottom padding only earns its space while
+    // scrolling a long list — drop it so the hand range chart has a better
+    // shot at fitting on one screen. Keep the title/tabs in place so
+    // switching tabs doesn't shift where they sit on screen.
     document.body.classList.toggle('compact-view', !isRecords);
   });
 });
