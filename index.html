@@ -416,6 +416,15 @@
     color: var(--text-dim);
     font-size: 0.8rem;
   }
+  .advanced-filter input[type="text"] {
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    background: #222b40;
+    color: var(--text);
+    font-size: 0.85rem;
+  }
   .clear-filter-btn {
     width: 100%;
     padding: 9px;
@@ -594,16 +603,6 @@
 <button type="button" class="filter-toggle-btn" id="advancedFilterToggle">詳細フィルター ▾</button>
 <div class="advanced-filter" id="advancedFilter" style="display:none;">
   <div class="field">
-    <label>プレイ倍率</label>
-    <div class="btn-group" id="multFilterGroup">
-      <button type="button" data-val="4">x4</button>
-      <button type="button" data-val="3">x3</button>
-      <button type="button" data-val="2">x2</button>
-      <button type="button" data-val="1">x1</button>
-      <button type="button" data-val="0">x0</button>
-    </div>
-  </div>
-  <div class="field">
     <label>期間（開始・終了どちらか片方だけでも可）</label>
     <div class="range-inputs">
       <input type="datetime-local" id="dateFilterStart">
@@ -617,6 +616,31 @@
       <input type="number" id="profitFilterMin" placeholder="最小">
       <span>〜</span>
       <input type="number" id="profitFilterMax" placeholder="最大">
+    </div>
+  </div>
+  <div class="field">
+    <label>プレイ倍率</label>
+    <div class="btn-group" id="multFilterGroup">
+      <button type="button" data-val="4">x4</button>
+      <button type="button" data-val="3">x3</button>
+      <button type="button" data-val="2">x2</button>
+      <button type="button" data-val="1">x1</button>
+      <button type="button" data-val="0">x0</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>勝敗</label>
+    <div class="btn-group" id="resultFilterGroup">
+      <button type="button" data-val="win">勝ち</button>
+      <button type="button" data-val="lose">負け</button>
+      <button type="button" data-val="push">プッシュ</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>クォリファイ</label>
+    <div class="btn-group" id="qualifyFilterGroup">
+      <button type="button" data-val="yes">あり</button>
+      <button type="button" data-val="no">なし</button>
     </div>
   </div>
   <div class="field">
@@ -642,6 +666,18 @@
       <span>〜</span>
       <input type="number" id="sixCardBonusFilterMax" placeholder="最大">
     </div>
+  </div>
+  <div class="field">
+    <label>完成した役</label>
+    <div class="btn-group" id="handFilterGroup"></div>
+  </div>
+  <div class="field">
+    <label>6カードボーナスで完成した役</label>
+    <div class="btn-group" id="sixCardHandFilterGroup"></div>
+  </div>
+  <div class="field">
+    <label>メモ（キーワードの部分一致）</label>
+    <input type="text" id="noteFilterText" placeholder="メモ内のキーワード">
   </div>
   <button type="button" class="clear-filter-btn" id="clearAdvancedFilterBtn">絞り込みをクリア</button>
 </div>
@@ -751,7 +787,7 @@
 // Bump this on every deploy. Used to detect a stale cached copy — this
 // matters most for "Add to Home Screen" launches, which tend to reopen a
 // cached page instead of hitting the network like a normal browser tab.
-const APP_VERSION = '2026-08-06.8';
+const APP_VERSION = '2026-08-06.9';
 
 const STORAGE_KEY = 'ultimate_poker_entries_v1';
 const DEALER_STORAGE_KEY = 'ultimate_poker_dealers_v1';
@@ -870,6 +906,10 @@ let editingId = null;
 let deleteConfirmId = null;
 let currentDealerFilter = 'all';
 let multFilterSet = new Set();
+let resultFilterSet = new Set();
+let qualifyFilterSet = new Set();
+let handFilterSet = new Set();
+let sixCardHandFilterSet = new Set();
 
 const viewTabs = document.getElementById('viewTabs');
 const recordsView = document.getElementById('recordsView');
@@ -884,6 +924,11 @@ const dealerFilterSelect = document.getElementById('dealerFilterSelect');
 const advancedFilterToggle = document.getElementById('advancedFilterToggle');
 const advancedFilter = document.getElementById('advancedFilter');
 const multFilterGroup = document.getElementById('multFilterGroup');
+const resultFilterGroup = document.getElementById('resultFilterGroup');
+const qualifyFilterGroup = document.getElementById('qualifyFilterGroup');
+const handFilterGroup = document.getElementById('handFilterGroup');
+const sixCardHandFilterGroup = document.getElementById('sixCardHandFilterGroup');
+const noteFilterText = document.getElementById('noteFilterText');
 const dateFilterStart = document.getElementById('dateFilterStart');
 const dateFilterEnd = document.getElementById('dateFilterEnd');
 const profitFilterMin = document.getElementById('profitFilterMin');
@@ -1316,6 +1361,17 @@ const RANGE_FILTERS = [
   { min: sixCardBonusFilterMin, max: sixCardBonusFilterMax, getValue: entrySixCardBonusBet },
 ];
 
+// Multi-select toggle filters sharing the same group/set/getter shape,
+// likewise reused by getFilteredEntries, countActiveAdvancedFilters, and
+// the click-wiring/clear logic below.
+const MULTI_SELECT_FILTERS = [
+  { group: multFilterGroup, filterSet: multFilterSet, getValue: e => String(e.mult) },
+  { group: resultFilterGroup, filterSet: resultFilterSet, getValue: e => e.result },
+  { group: qualifyFilterGroup, filterSet: qualifyFilterSet, getValue: e => e.qualify },
+  { group: handFilterGroup, filterSet: handFilterSet, getValue: e => e.hand || '配当なし' },
+  { group: sixCardHandFilterGroup, filterSet: sixCardHandFilterSet, getValue: e => e.sixCardHand || '配当なし' },
+];
+
 function getFilteredEntries() {
   let list = entries;
 
@@ -1325,9 +1381,11 @@ function getFilteredEntries() {
     list = list.filter(e => e.dealer === currentDealerFilter);
   }
 
-  if (multFilterSet.size > 0) {
-    list = list.filter(e => multFilterSet.has(String(e.mult)));
-  }
+  MULTI_SELECT_FILTERS.forEach(({ filterSet, getValue }) => {
+    if (filterSet.size > 0) {
+      list = list.filter(e => filterSet.has(getValue(e)));
+    }
+  });
 
   if (dateFilterStart.value) {
     const startTime = new Date(dateFilterStart.value).getTime();
@@ -1349,14 +1407,20 @@ function getFilteredEntries() {
     }
   });
 
+  if (noteFilterText.value.trim() !== '') {
+    const query = noteFilterText.value.trim().toLowerCase();
+    list = list.filter(e => (e.note || '').toLowerCase().includes(query));
+  }
+
   return list;
 }
 
 function countActiveAdvancedFilters() {
   let count = 0;
-  if (multFilterSet.size > 0) count++;
+  MULTI_SELECT_FILTERS.forEach(({ filterSet }) => { if (filterSet.size > 0) count++; });
   if (dateFilterStart.value) count++;
   if (dateFilterEnd.value) count++;
+  if (noteFilterText.value.trim() !== '') count++;
   RANGE_FILTERS.forEach(({ min, max }) => {
     if (min.value !== '') count++;
     if (max.value !== '') count++;
@@ -1377,22 +1441,40 @@ advancedFilterToggle.addEventListener('click', () => {
   updateAdvancedFilterToggleLabel();
 });
 
-multFilterGroup.querySelectorAll('button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const val = btn.dataset.val;
-    if (multFilterSet.has(val)) {
-      multFilterSet.delete(val);
-      btn.classList.remove('active');
-    } else {
-      multFilterSet.add(val);
-      btn.classList.add('active');
-    }
-    updateAdvancedFilterToggleLabel();
-    refreshView();
+function populateFilterGroupOptions(group, options) {
+  group.innerHTML = '';
+  options.forEach(opt => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.val = opt;
+    btn.textContent = opt;
+    group.appendChild(btn);
   });
-});
+}
+populateFilterGroupOptions(handFilterGroup, HAND_OPTIONS);
+populateFilterGroupOptions(sixCardHandFilterGroup, SIX_CARD_HAND_OPTIONS);
 
-const advancedFilterInputs = [dateFilterStart, dateFilterEnd, ...RANGE_FILTERS.flatMap(({ min, max }) => [min, max])];
+// Toggle multi-select filter groups: clicking a button adds/removes its
+// value from filterSet; an empty set means "no filter" (show everything).
+function setupMultiSelectFilterGroup(group, filterSet) {
+  group.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const val = btn.dataset.val;
+      if (filterSet.has(val)) {
+        filterSet.delete(val);
+        btn.classList.remove('active');
+      } else {
+        filterSet.add(val);
+        btn.classList.add('active');
+      }
+      updateAdvancedFilterToggleLabel();
+      refreshView();
+    });
+  });
+}
+MULTI_SELECT_FILTERS.forEach(({ group, filterSet }) => setupMultiSelectFilterGroup(group, filterSet));
+
+const advancedFilterInputs = [dateFilterStart, dateFilterEnd, noteFilterText, ...RANGE_FILTERS.flatMap(({ min, max }) => [min, max])];
 advancedFilterInputs.forEach(input => {
   input.addEventListener('input', () => {
     updateAdvancedFilterToggleLabel();
@@ -1401,10 +1483,13 @@ advancedFilterInputs.forEach(input => {
 });
 
 clearAdvancedFilterBtn.addEventListener('click', () => {
-  multFilterSet.clear();
-  multFilterGroup.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+  MULTI_SELECT_FILTERS.forEach(({ group, filterSet }) => {
+    filterSet.clear();
+    group.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+  });
   dateFilterStart.value = '';
   dateFilterEnd.value = '';
+  noteFilterText.value = '';
   RANGE_FILTERS.forEach(({ min, max }) => { min.value = ''; max.value = ''; });
   updateAdvancedFilterToggleLabel();
   refreshView();
