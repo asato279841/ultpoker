@@ -668,12 +668,12 @@
     </div>
   </div>
   <div class="field">
-    <label>完成した役</label>
-    <div class="btn-group" id="handFilterGroup"></div>
+    <label>完成した役（Ctrl/Cmdクリックやタップで複数選択可）</label>
+    <select id="handFilterSelect" multiple size="4"></select>
   </div>
   <div class="field">
-    <label>6カードボーナスで完成した役</label>
-    <div class="btn-group" id="sixCardHandFilterGroup"></div>
+    <label>6カードボーナスで完成した役（複数選択可）</label>
+    <select id="sixCardHandFilterSelect" multiple size="4"></select>
   </div>
   <div class="field">
     <label>メモ（キーワードの部分一致）</label>
@@ -739,12 +739,12 @@
 
   <div class="field">
     <label>完成した役（ブラインド・トリップス判定用）</label>
-    <button type="button" class="picker-btn" id="handPickerBtn">選択してください</button>
+    <select id="handSelect"></select>
   </div>
 
   <div class="field" id="sixCardHandField">
     <label>6カードボーナスの役</label>
-    <button type="button" class="picker-btn" id="sixCardHandPickerBtn">選択してください</button>
+    <select id="sixCardHandSelect"></select>
   </div>
 
   <div class="field">
@@ -787,7 +787,7 @@
 // Bump this on every deploy. Used to detect a stale cached copy — this
 // matters most for "Add to Home Screen" launches, which tend to reopen a
 // cached page instead of hitting the network like a normal browser tab.
-const APP_VERSION = '2026-08-06.9';
+const APP_VERSION = '2026-08-07.1';
 
 const STORAGE_KEY = 'ultimate_poker_entries_v1';
 const DEALER_STORAGE_KEY = 'ultimate_poker_dealers_v1';
@@ -908,8 +908,6 @@ let currentDealerFilter = 'all';
 let multFilterSet = new Set();
 let resultFilterSet = new Set();
 let qualifyFilterSet = new Set();
-let handFilterSet = new Set();
-let sixCardHandFilterSet = new Set();
 
 const viewTabs = document.getElementById('viewTabs');
 const recordsView = document.getElementById('recordsView');
@@ -926,8 +924,8 @@ const advancedFilter = document.getElementById('advancedFilter');
 const multFilterGroup = document.getElementById('multFilterGroup');
 const resultFilterGroup = document.getElementById('resultFilterGroup');
 const qualifyFilterGroup = document.getElementById('qualifyFilterGroup');
-const handFilterGroup = document.getElementById('handFilterGroup');
-const sixCardHandFilterGroup = document.getElementById('sixCardHandFilterGroup');
+const handFilterSelect = document.getElementById('handFilterSelect');
+const sixCardHandFilterSelect = document.getElementById('sixCardHandFilterSelect');
 const noteFilterText = document.getElementById('noteFilterText');
 const dateFilterStart = document.getElementById('dateFilterStart');
 const dateFilterEnd = document.getElementById('dateFilterEnd');
@@ -946,12 +944,12 @@ const importFileInput = document.getElementById('importFileInput');
 const resultField = document.getElementById('resultField');
 const qualifyField = document.getElementById('qualifyField');
 const sixCardHandField = document.getElementById('sixCardHandField');
-const handPickerBtn = document.getElementById('handPickerBtn');
+const handSelect = document.getElementById('handSelect');
+const sixCardHandSelect = document.getElementById('sixCardHandSelect');
 const dealerPickerBtn = document.getElementById('dealerPickerBtn');
 const antePickerBtn = document.getElementById('antePickerBtn');
 const tripsPickerBtn = document.getElementById('tripsPickerBtn');
 const sixCardBonusPickerBtn = document.getElementById('sixCardBonusPickerBtn');
-const sixCardHandPickerBtn = document.getElementById('sixCardHandPickerBtn');
 const pickerOverlay = document.getElementById('pickerOverlay');
 const pickerWheel = document.getElementById('pickerWheel');
 const pickerTitle = document.getElementById('pickerTitle');
@@ -1022,12 +1020,12 @@ function resetForm() {
   };
   editingId = null;
   document.getElementById('editingId').value = '';
-  setPickerBtnLabel(handPickerBtn, state.hand);
+  handSelect.value = state.hand;
   setPickerBtnLabel(dealerPickerBtn, state.dealer);
   setPickerBtnLabel(antePickerBtn, String(state.anteBet));
   setPickerBtnLabel(tripsPickerBtn, String(state.tripsBet));
   setPickerBtnLabel(sixCardBonusPickerBtn, String(state.sixCardBonusBet));
-  setPickerBtnLabel(sixCardHandPickerBtn, state.sixCardHand);
+  sixCardHandSelect.value = state.sixCardHand;
   document.getElementById('noteInput').value = '';
   document.querySelectorAll('.btn-group button').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.field-error').forEach(e => e.classList.remove('show'));
@@ -1117,11 +1115,24 @@ pickerDoneBtn.addEventListener('click', () => {
   onConfirm(value);
 });
 
-handPickerBtn.addEventListener('click', () => {
-  openPicker('完成した役', HAND_OPTIONS, state.hand, (val) => {
-    state.hand = val;
-    setPickerBtnLabel(handPickerBtn, val);
+function populateSelectOptions(select, options) {
+  select.innerHTML = '';
+  options.forEach(opt => {
+    const optionEl = document.createElement('option');
+    optionEl.value = opt;
+    optionEl.textContent = opt;
+    select.appendChild(optionEl);
   });
+}
+populateSelectOptions(handSelect, HAND_OPTIONS);
+populateSelectOptions(sixCardHandSelect, SIX_CARD_HAND_OPTIONS);
+
+handSelect.addEventListener('change', () => {
+  state.hand = handSelect.value;
+});
+
+sixCardHandSelect.addEventListener('change', () => {
+  state.sixCardHand = sixCardHandSelect.value;
 });
 
 dealerPickerBtn.addEventListener('click', () => {
@@ -1150,13 +1161,6 @@ sixCardBonusPickerBtn.addEventListener('click', () => {
     state.sixCardBonusBet = val;
     setPickerBtnLabel(sixCardBonusPickerBtn, String(val));
     updateSixCardHandVisibility();
-  });
-});
-
-sixCardHandPickerBtn.addEventListener('click', () => {
-  openPicker('6カードボーナスの役', SIX_CARD_HAND_OPTIONS, state.sixCardHand, (val) => {
-    state.sixCardHand = val;
-    setPickerBtnLabel(sixCardHandPickerBtn, val);
   });
 });
 
@@ -1361,15 +1365,22 @@ const RANGE_FILTERS = [
   { min: sixCardBonusFilterMin, max: sixCardBonusFilterMax, getValue: entrySixCardBonusBet },
 ];
 
-// Multi-select toggle filters sharing the same group/set/getter shape,
-// likewise reused by getFilteredEntries, countActiveAdvancedFilters, and
-// the click-wiring/clear logic below.
+function selectedOptionValues(select) {
+  return new Set(Array.from(select.selectedOptions).map(o => o.value));
+}
+
+// Multi-select filters sharing the same getSelected()/getValue shape,
+// reused by getFilteredEntries, countActiveAdvancedFilters, and the
+// wiring/clear logic below. プレイ倍率/勝敗/クォリファイ are toggle-button
+// groups backed by a manually-maintained Set; 完成した役/6カードボーナスの
+//役 are native <select multiple> elements, so their "selected set" is read
+// straight off the DOM instead.
 const MULTI_SELECT_FILTERS = [
-  { group: multFilterGroup, filterSet: multFilterSet, getValue: e => String(e.mult) },
-  { group: resultFilterGroup, filterSet: resultFilterSet, getValue: e => e.result },
-  { group: qualifyFilterGroup, filterSet: qualifyFilterSet, getValue: e => e.qualify },
-  { group: handFilterGroup, filterSet: handFilterSet, getValue: e => e.hand || '配当なし' },
-  { group: sixCardHandFilterGroup, filterSet: sixCardHandFilterSet, getValue: e => e.sixCardHand || '配当なし' },
+  { getSelected: () => multFilterSet, getValue: e => String(e.mult) },
+  { getSelected: () => resultFilterSet, getValue: e => e.result },
+  { getSelected: () => qualifyFilterSet, getValue: e => e.qualify },
+  { getSelected: () => selectedOptionValues(handFilterSelect), getValue: e => e.hand || '配当なし' },
+  { getSelected: () => selectedOptionValues(sixCardHandFilterSelect), getValue: e => e.sixCardHand || '配当なし' },
 ];
 
 function getFilteredEntries() {
@@ -1381,9 +1392,10 @@ function getFilteredEntries() {
     list = list.filter(e => e.dealer === currentDealerFilter);
   }
 
-  MULTI_SELECT_FILTERS.forEach(({ filterSet, getValue }) => {
-    if (filterSet.size > 0) {
-      list = list.filter(e => filterSet.has(getValue(e)));
+  MULTI_SELECT_FILTERS.forEach(({ getSelected, getValue }) => {
+    const selected = getSelected();
+    if (selected.size > 0) {
+      list = list.filter(e => selected.has(getValue(e)));
     }
   });
 
@@ -1417,7 +1429,7 @@ function getFilteredEntries() {
 
 function countActiveAdvancedFilters() {
   let count = 0;
-  MULTI_SELECT_FILTERS.forEach(({ filterSet }) => { if (filterSet.size > 0) count++; });
+  MULTI_SELECT_FILTERS.forEach(({ getSelected }) => { if (getSelected().size > 0) count++; });
   if (dateFilterStart.value) count++;
   if (dateFilterEnd.value) count++;
   if (noteFilterText.value.trim() !== '') count++;
@@ -1441,21 +1453,12 @@ advancedFilterToggle.addEventListener('click', () => {
   updateAdvancedFilterToggleLabel();
 });
 
-function populateFilterGroupOptions(group, options) {
-  group.innerHTML = '';
-  options.forEach(opt => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.dataset.val = opt;
-    btn.textContent = opt;
-    group.appendChild(btn);
-  });
-}
-populateFilterGroupOptions(handFilterGroup, HAND_OPTIONS);
-populateFilterGroupOptions(sixCardHandFilterGroup, SIX_CARD_HAND_OPTIONS);
+populateSelectOptions(handFilterSelect, HAND_OPTIONS);
+populateSelectOptions(sixCardHandFilterSelect, SIX_CARD_HAND_OPTIONS);
 
-// Toggle multi-select filter groups: clicking a button adds/removes its
-// value from filterSet; an empty set means "no filter" (show everything).
+// Toggle multi-select filter groups (プレイ倍率/勝敗/クォリファイ): clicking
+// a button adds/removes its value from filterSet; an empty set means "no
+// filter" (show everything).
 function setupMultiSelectFilterGroup(group, filterSet) {
   group.querySelectorAll('button').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1472,20 +1475,33 @@ function setupMultiSelectFilterGroup(group, filterSet) {
     });
   });
 }
-MULTI_SELECT_FILTERS.forEach(({ group, filterSet }) => setupMultiSelectFilterGroup(group, filterSet));
+[
+  { group: multFilterGroup, filterSet: multFilterSet },
+  { group: resultFilterGroup, filterSet: resultFilterSet },
+  { group: qualifyFilterGroup, filterSet: qualifyFilterSet },
+].forEach(({ group, filterSet }) => setupMultiSelectFilterGroup(group, filterSet));
 
-const advancedFilterInputs = [dateFilterStart, dateFilterEnd, noteFilterText, ...RANGE_FILTERS.flatMap(({ min, max }) => [min, max])];
+const advancedFilterInputs = [
+  dateFilterStart, dateFilterEnd, noteFilterText, handFilterSelect, sixCardHandFilterSelect,
+  ...RANGE_FILTERS.flatMap(({ min, max }) => [min, max]),
+];
 advancedFilterInputs.forEach(input => {
-  input.addEventListener('input', () => {
+  const eventName = input.tagName === 'SELECT' ? 'change' : 'input';
+  input.addEventListener(eventName, () => {
     updateAdvancedFilterToggleLabel();
     refreshView();
   });
 });
 
 clearAdvancedFilterBtn.addEventListener('click', () => {
-  MULTI_SELECT_FILTERS.forEach(({ group, filterSet }) => {
-    filterSet.clear();
+  [multFilterGroup, resultFilterGroup, qualifyFilterGroup].forEach(group => {
     group.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+  });
+  multFilterSet.clear();
+  resultFilterSet.clear();
+  qualifyFilterSet.clear();
+  [handFilterSelect, sixCardHandFilterSelect].forEach(select => {
+    Array.from(select.options).forEach(o => { o.selected = false; });
   });
   dateFilterStart.value = '';
   dateFilterEnd.value = '';
@@ -1641,12 +1657,12 @@ window.editEntry = function(id) {
   if (resultBtn) resultBtn.classList.add('active');
   const qualifyBtn = document.querySelector(`#qualifyGroup button[data-val="${e.qualify}"]`);
   if (qualifyBtn) qualifyBtn.classList.add('active');
-  setPickerBtnLabel(handPickerBtn, state.hand);
+  handSelect.value = state.hand;
   setPickerBtnLabel(dealerPickerBtn, state.dealer);
   setPickerBtnLabel(antePickerBtn, String(state.anteBet));
   setPickerBtnLabel(tripsPickerBtn, String(state.tripsBet));
   setPickerBtnLabel(sixCardBonusPickerBtn, String(state.sixCardBonusBet));
-  setPickerBtnLabel(sixCardHandPickerBtn, state.sixCardHand);
+  sixCardHandSelect.value = state.sixCardHand;
   document.getElementById('noteInput').value = e.note || '';
   document.getElementById('submitBtn').textContent = '更新する';
   updateFoldVisibility();
