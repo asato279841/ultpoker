@@ -454,6 +454,49 @@
     margin-top: 4px;
   }
 
+  .profit-chart-panel {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 12px;
+    margin-top: -6px;
+    margin-bottom: 16px;
+  }
+  .profit-chart-empty {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    padding: 20px 0;
+  }
+  .profit-chart-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .profit-chart-zero-line {
+    stroke: var(--card-border);
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+  }
+  .profit-chart-line {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+  .profit-chart-dot {
+    fill: var(--accent);
+  }
+  .profit-chart-axis-label {
+    fill: var(--text-dim);
+    font-size: 9px;
+  }
+  .profit-chart-end-label {
+    font-size: 11px;
+    font-weight: 700;
+  }
+
   .update-banner {
     position: sticky;
     top: 0;
@@ -686,6 +729,11 @@
 
 <div class="profit-banner" id="profitBanner"></div>
 
+<button type="button" class="filter-toggle-btn" id="profitChartToggle">収支グラフ ▴</button>
+<div class="profit-chart-panel" id="profitChartPanel">
+  <div id="profitChartContainer"></div>
+</div>
+
 <button class="toggle-form-btn" id="toggleFormBtn">＋ 新しく記録する</button>
 
 <form id="entryForm" style="display:none;">
@@ -787,7 +835,7 @@
 // Bump this on every deploy. Used to detect a stale cached copy — this
 // matters most for "Add to Home Screen" launches, which tend to reopen a
 // cached page instead of hitting the network like a normal browser tab.
-const APP_VERSION = '2026-08-07.1';
+const APP_VERSION = '2026-08-07.2';
 
 const STORAGE_KEY = 'ultimate_poker_entries_v1';
 const DEALER_STORAGE_KEY = 'ultimate_poker_dealers_v1';
@@ -918,6 +966,9 @@ const cancelBtn = document.getElementById('cancelBtn');
 const entriesDiv = document.getElementById('entries');
 const summaryDiv = document.getElementById('summary');
 const profitBanner = document.getElementById('profitBanner');
+const profitChartToggle = document.getElementById('profitChartToggle');
+const profitChartPanel = document.getElementById('profitChartPanel');
+const profitChartContainer = document.getElementById('profitChartContainer');
 const dealerFilterSelect = document.getElementById('dealerFilterSelect');
 const advancedFilterToggle = document.getElementById('advancedFilterToggle');
 const advancedFilter = document.getElementById('advancedFilter');
@@ -1453,6 +1504,12 @@ advancedFilterToggle.addEventListener('click', () => {
   updateAdvancedFilterToggleLabel();
 });
 
+profitChartToggle.addEventListener('click', () => {
+  const isHidden = profitChartPanel.style.display === 'none';
+  profitChartPanel.style.display = isHidden ? '' : 'none';
+  profitChartToggle.textContent = `収支グラフ ${isHidden ? '▴' : '▾'}`;
+});
+
 populateSelectOptions(handFilterSelect, HAND_OPTIONS);
 populateSelectOptions(sixCardHandFilterSelect, SIX_CARD_HAND_OPTIONS);
 
@@ -1545,6 +1602,7 @@ function refreshView() {
   const filtered = getFilteredEntries();
   renderEntries(filtered);
   renderSummary(filtered);
+  renderProfitChart(filtered);
 }
 
 function renderSummary(list) {
@@ -1563,6 +1621,60 @@ function renderSummary(list) {
   const sign = profit > 0 ? '+' : '';
   const cls = profit > 0 ? 'win-color' : profit < 0 ? 'lose-color' : 'accent-color';
   profitBanner.innerHTML = `収支（アンテ・トリップス・6カードボーナスの実ベット額ベース）<span class="profit-num ${cls}">${sign}${formatProfit(profit)}</span>`;
+}
+
+// Cumulative profit line chart (a "bankroll graph") over the currently
+// filtered records, oldest to newest. Hand-rolled SVG rather than a
+// charting library, consistent with this being a single self-contained,
+// fully offline HTML file.
+function renderProfitChart(list) {
+  if (list.length === 0) {
+    profitChartContainer.innerHTML = '<div class="profit-chart-empty">グラフを表示するには記録が必要です</div>';
+    return;
+  }
+
+  const sorted = [...list].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  let running = 0;
+  const values = sorted.map(e => { running += computeProfit(e); return running; });
+
+  const W = 600, H = 160;
+  const padTop = 14, padBottom = 14, padLeft = 6, padRight = 52;
+  const plotW = W - padLeft - padRight;
+  const plotH = H - padTop - padBottom;
+
+  const minVal = Math.min(0, ...values);
+  const maxVal = Math.max(0, ...values);
+  const range = (maxVal - minVal) || 1;
+
+  const xAt = (i) => padLeft + (values.length === 1 ? plotW / 2 : (i / (values.length - 1)) * plotW);
+  const yAt = (v) => padTop + (1 - (v - minVal) / range) * plotH;
+  const zeroY = yAt(0);
+
+  const finalValue = values[values.length - 1];
+  const finalSign = finalValue > 0 ? '+' : '';
+  const finalCls = finalValue > 0 ? 'win-color' : finalValue < 0 ? 'lose-color' : 'accent-color';
+  const endLabelY = Math.min(Math.max(yAt(finalValue), padTop + 4), H - 4);
+
+  let lineMarkup;
+  if (values.length === 1) {
+    lineMarkup = `<circle class="profit-chart-dot" cx="${xAt(0).toFixed(1)}" cy="${yAt(values[0]).toFixed(1)}" r="3.5"></circle>`;
+  } else {
+    const points = values.map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`).join(' ');
+    const dots = values.length <= 30
+      ? values.map((v, i) => `<circle class="profit-chart-dot" cx="${xAt(i).toFixed(1)}" cy="${yAt(v).toFixed(1)}" r="2.5"></circle>`).join('')
+      : '';
+    lineMarkup = `<polyline class="profit-chart-line" points="${points}"></polyline>${dots}`;
+  }
+
+  profitChartContainer.innerHTML = `
+    <svg class="profit-chart-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <line class="profit-chart-zero-line" x1="${padLeft}" y1="${zeroY.toFixed(1)}" x2="${W - padRight}" y2="${zeroY.toFixed(1)}"></line>
+      ${lineMarkup}
+      <text class="profit-chart-axis-label" x="${padLeft}" y="${padTop - 4}">${formatProfit(maxVal)}</text>
+      <text class="profit-chart-axis-label" x="${padLeft}" y="${H - 4}">${formatProfit(minVal)}</text>
+      <text class="profit-chart-end-label ${finalCls}" fill="currentColor" dominant-baseline="middle" x="${(W - padRight + 6).toFixed(1)}" y="${endLabelY.toFixed(1)}">${finalSign}${formatProfit(finalValue)}</text>
+    </svg>
+  `;
 }
 
 // Rounds away binary floating-point noise (e.g. from legacy 0.2-unit trips
